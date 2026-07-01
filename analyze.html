@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Shadowfox · Analyzer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d0d0f;
+      color: #c9cdd4;
+      font: 14px/1.6 "SF Mono", "Fira Code", monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 24px;
+      gap: 20px;
+    }
+
+    h1 {
+      font-size: 16px; font-weight: 600; letter-spacing: 0.08em;
+      color: #e8eaf0; text-transform: uppercase;
+    }
+
+    .drop-zone {
+      width: 100%; max-width: 720px;
+      border: 1px dashed #2e3038; border-radius: 8px;
+      padding: 28px; text-align: center; cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: #4a9eff; background: rgba(74, 158, 255, 0.04);
+    }
+    .drop-zone input { display: none; }
+    .drop-zone .hint { color: #5a6070; font-size: 13px; }
+    .drop-zone .hint span { color: #4a9eff; }
+
+    #status { font-size: 12px; color: #5a6070; min-height: 18px; }
+
+    .panel {
+      width: 100%; max-width: 720px;
+      background: #13141a; border: 1px solid #1e2028; border-radius: 8px;
+      padding: 16px 20px; display: none;
+    }
+    .panel.visible { display: block; }
+
+    /* codec badges */
+    .badges { display: flex; flex-wrap: wrap; gap: 0; }
+    .badge-item { display: flex; align-items: center; gap: 8px; padding: 4px 16px 4px 0; }
+    .badge-item .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #3a4050; }
+    .badge-item .val { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 4px; background: #1a1c24; color: #c9cdd4; }
+    .badge-item .val.video     { color: #b07aff; background: #1e1528; }
+    .badge-item .val.audio     { color: #4a9eff; background: #0f1828; }
+    .badge-item .val.container { color: #4caf7d; background: #0c1a12; }
+
+    /* loudness */
+    .metrics { display: flex; gap: 28px; flex-wrap: wrap; align-items: center; }
+    .metric .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: #4a5060; }
+    .metric .value { font-size: 22px; font-weight: 600; color: #e8eaf0; }
+    .metric .value.warn  { color: #f5a623; }
+    .metric .value.ok    { color: #4caf7d; }
+    .metric .value.boost { color: #4a9eff; }
+
+    .panel-label {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+      color: #3a4050; margin-bottom: 8px;
+    }
+    canvas { display: block; width: 100%; border-radius: 4px; }
+    #waveform  { height: 100px; background: #0a0b0e; }
+    #thumbCanvas { height: auto; background: #0a0b0e; }
+  </style>
+</head>
+<body>
+  <h1>Shadowfox · Media Analyzer</h1>
+
+  <div class="drop-zone" id="dropZone">
+    <input type="file" id="fileInput" accept="audio/*,video/*" />
+    <div class="hint">Drop an audio or video file here, or <span>browse</span></div>
+  </div>
+
+  <div id="status">Ready — drop a file to analyze.</div>
+
+  <div class="panel" id="codecPanel">
+    <div class="panel-label">Codec / Container</div>
+    <div class="badges" id="badges"></div>
+  </div>
+
+  <div class="panel" id="loudPanel">
+    <div class="panel-label">Loudness (EBU R128)</div>
+    <div class="metrics">
+      <div class="metric"><div class="label">Integrated</div><div class="value" id="lufsVal">—</div></div>
+      <div class="metric"><div class="label">Target</div><div class="value">−23.0 LUFS</div></div>
+      <div class="metric"><div class="label">Gain to Target</div><div class="value" id="gainVal">—</div></div>
+    </div>
+  </div>
+
+  <div class="panel" id="wavePanel">
+    <div class="panel-label">Waveform</div>
+    <canvas id="waveform"></canvas>
+  </div>
+
+  <div class="panel" id="thumbPanel">
+    <div class="panel-label">Timeline Thumbnails</div>
+    <canvas id="thumbCanvas"></canvas>
+  </div>
+
+  <script type="module">
+    import { fox } from './fox-worker-client.js';
+    import { generateThumbnails } from './fox-strip.js';
+
+    const TARGET_LUFS = -23.0;
+
+    const dropZone  = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const statusEl  = document.getElementById('status');
+
+    const codecPanel = document.getElementById('codecPanel');
+    const badges     = document.getElementById('badges');
+    const loudPanel  = document.getElementById('loudPanel');
+    const lufsVal    = document.getElementById('lufsVal');
+    const gainVal    = document.getElementById('gainVal');
+    const wavePanel  = document.getElementById('wavePanel');
+    const waveform   = document.getElementById('waveform');
+    const thumbPanel = document.getElementById('thumbPanel');
+    const thumbCanvas = document.getElementById('thumbCanvas');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file) analyze(file);
+    });
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) analyze(file);
+      fileInput.value = '';
+    });
+
+    async function analyze(file) {
+      for (const p of [codecPanel, loudPanel, wavePanel, thumbPanel]) p.classList.remove('visible');
+      statusEl.textContent = `Reading ${file.name}…`;
+
+      // 1. Codec / container info
+      let info;
+      try {
+        info = await fox.mediaInfo(file);
+        renderBadges(info);
+      } catch (err) {
+        statusEl.textContent = `Probe error: ${err.message || err}`;
+        return;
+      }
+
+      // 2. Waveform
+      statusEl.textContent = 'Extracting waveform…';
+      try {
+        const cssW = Math.min(720, waveform.parentElement.clientWidth || 720);
+        const dpr  = window.devicePixelRatio || 1;
+        const numPeaks = Math.round(cssW * dpr);
+        waveform.width  = numPeaks;
+        waveform.height = Math.round(100 * dpr);
+        waveform.style.height = '100px';
+        drawWaveform(waveform, await fox.peaks(file, numPeaks));
+        wavePanel.classList.add('visible');
+      } catch (err) {
+        statusEl.textContent = `Waveform error: ${err.message || err}`;
+      }
+
+      // 3. Loudness
+      statusEl.textContent = 'Measuring loudness…';
+      try {
+        const lufs = await fox.lufs(file);
+        renderLoudness(lufs);
+      } catch (err) {
+        statusEl.textContent = `Loudness error: ${err.message || err}`;
+      }
+
+      // 4. Timeline thumbnails (video only)
+      if (info.video_codec) {
+        statusEl.textContent = 'Generating timeline thumbnails…';
+        try {
+          const stripCssW = Math.min(720, thumbCanvas.parentElement.clientWidth || 720);
+          const count     = 10;
+          const thumbCssW = Math.floor(stripCssW / count);
+          const thumbCssH = Math.round(thumbCssW * 9 / 16);
+          const dpr       = window.devicePixelRatio || 1;
+
+          const thumbs = await generateThumbnails(file, {
+            count,
+            width:  Math.round(thumbCssW * dpr),
+            height: Math.round(thumbCssH * dpr),
+          });
+          drawThumbnails(thumbs, stripCssW, thumbCssW, thumbCssH, dpr);
+          thumbPanel.classList.add('visible');
+        } catch (err) {
+          statusEl.textContent = `Thumbnail error: ${err.message || err}`;
+        }
+      }
+
+      statusEl.textContent = `Done — ${file.name}`;
+    }
+
+    function renderBadges(info) {
+      const items = [
+        ['Container', info.container, 'container'],
+        ['Audio',     info.audio_codec, 'audio'],
+      ];
+      if (info.video_codec) items.push(['Video', info.video_codec, 'video']);
+      if (info.channels != null) {
+        const chLabel = info.channels === 1 ? 'Mono' : info.channels === 2 ? 'Stereo' : `${info.channels}ch`;
+        items.push(['Channels', chLabel, '']);
+      }
+      if (info.sample_rate != null) items.push(['Sample Rate', `${(info.sample_rate / 1000).toFixed(1)} kHz`, '']);
+      if (info.bits_per_sample != null) items.push(['Bit Depth', `${info.bits_per_sample}-bit`, '']);
+
+      badges.innerHTML = items.map(([label, val, cls]) =>
+        `<div class="badge-item"><span class="label">${label}</span><span class="val ${cls}">${val ?? '—'}</span></div>`
+      ).join('');
+      codecPanel.classList.add('visible');
+    }
+
+    function renderLoudness(lufs) {
+      if (!Number.isFinite(lufs)) {
+        lufsVal.textContent = '−∞'; lufsVal.className = 'value';
+        gainVal.textContent = '—';  gainVal.className = 'value';
+      } else {
+        const gain = TARGET_LUFS - lufs;
+        lufsVal.textContent = `${lufs.toFixed(2)} LUFS`;
+        lufsVal.className   = 'value' + (lufs > -14 ? ' warn' : '');
+        const sign = gain >= 0 ? '+' : '';
+        gainVal.textContent = `${sign}${gain.toFixed(2)} dB`;
+        gainVal.className   = 'value ' + (gain > 0 ? 'boost' : 'ok');
+      }
+      loudPanel.classList.add('visible');
+    }
+
+    function drawWaveform(canvas, peaks) {
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height, mid = H / 2;
+      ctx.fillStyle = '#0a0b0e'; ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = '#1e2028'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, 'rgba(74,158,255,0.9)');
+      grad.addColorStop(0.45, 'rgba(74,158,255,0.55)');
+      grad.addColorStop(0.5, 'rgba(74,158,255,0.55)');
+      grad.addColorStop(1, 'rgba(74,158,255,0.9)');
+      ctx.fillStyle = grad;
+      for (let i = 0; i < peaks.length; i++) {
+        const h = Math.max(1, peaks[i] * mid);
+        ctx.fillRect(i, mid - h, 1, h * 2);
+      }
+    }
+
+    function drawThumbnails(thumbs, stripCssW, thumbCssW, thumbCssH, dpr) {
+      const W = Math.round(stripCssW * dpr), H = Math.round(thumbCssH * dpr), tw = Math.round(thumbCssW * dpr);
+      thumbCanvas.width = W; thumbCanvas.height = H;
+      thumbCanvas.style.height = thumbCssH + 'px';
+      const ctx = thumbCanvas.getContext('2d');
+      ctx.fillStyle = '#0a0b0e'; ctx.fillRect(0, 0, W, H);
+      thumbs.forEach(({ bitmap, timestamp_s }, i) => {
+        const x = i * tw;
+        ctx.drawImage(bitmap, x, 0, tw, H);
+        bitmap.close();
+        if (i > 0) { ctx.fillStyle = '#0a0b0e'; ctx.fillRect(x, 0, 1, H); }
+        const label = formatTime(timestamp_s);
+        const pad = Math.round(3 * dpr), fsize = Math.round(9 * dpr);
+        ctx.font = `${fsize}px "SF Mono", "Fira Code", monospace`;
+        const labelW = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(x + pad, H - fsize - pad * 2, labelW + pad * 2, fsize + pad * 2);
+        ctx.fillStyle = '#c9cdd4';
+        ctx.fillText(label, x + pad * 2, H - pad * 2);
+      });
+    }
+
+    function formatTime(secs) {
+      const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = Math.floor(secs % 60);
+      return h > 0
+        ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+        : `${m}:${String(s).padStart(2, '0')}`;
+    }
+  </script>
+</body>
+</html>
