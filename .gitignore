@@ -1,0 +1,5 @@
+# Rust build output (workspace root + any per-crate target dirs)
+target/
+
+# macOS
+.DS_Store

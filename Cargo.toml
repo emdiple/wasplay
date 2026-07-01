@@ -1,0 +1,8 @@
+[workspace]
+members = ["fox-ear-wasm", "fox-soundwave-wasm", "fox-strip-wasm", "fox-edl-wasm"]
+resolver = "3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

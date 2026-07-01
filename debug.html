@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>fox-strip debug</title>
+  <style>
+    body { background: #0d0d0f; color: #c9cdd4; font: 13px/1.6 "SF Mono", monospace; padding: 24px; }
+    h2  { color: #e8eaf0; margin: 16px 0 4px; }
+    pre { background: #0f1015; border: 1px solid #1e2028; border-radius: 6px; padding: 12px;
+          white-space: pre-wrap; word-break: break-all; }
+    .ok   { color: #4caf7d; }
+    .err  { color: #f5a623; }
+    canvas { border: 1px solid #1e2028; display: block; margin: 8px 0; }
+    button { background: #1a1c24; border: 1px solid #2e3038; color: #c9cdd4;
+             padding: 6px 16px; border-radius: 4px; cursor: pointer; font: inherit; }
+    button:hover { border-color: #4a9eff; }
+  </style>
+</head>
+<body>
+  <h1>fox-strip-wasm debug</h1>
+  <p>Loads <code>sample-files/test-video.mp4</code> and runs each pipeline step.</p>
+  <button id="run">Run</button>
+
+  <h2>1. WebCodecs support</h2>
+  <pre id="outWebcodecs">—</pre>
+
+  <h2>2. WASM init</h2>
+  <pre id="outWasm">—</pre>
+
+  <h2>3. scan_keyframes</h2>
+  <pre id="outScan">—</pre>
+
+  <h2>4. VideoDecoder.isConfigSupported</h2>
+  <pre id="outSupport">—</pre>
+
+  <h2>5. Decode frame 0</h2>
+  <pre id="outDecode">—</pre>
+  <canvas id="dbgCanvas" width="320" height="180"></canvas>
+
+  <script type="module">
+    import init_strip, { scan_keyframes, get_keyframe_bytes, select_thumbnail_keyframes }
+      from './fox-strip-wasm/pkg/fox_strip_wasm.js';
+
+    function out(id, text, ok) {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      el.className = ok === false ? 'err' : ok === true ? 'ok' : '';
+    }
+
+    document.getElementById('run').onclick = async () => {
+      // 1. WebCodecs
+      const hasWC = 'VideoDecoder' in globalThis;
+      out('outWebcodecs', hasWC ? 'VideoDecoder available ✓' : 'VideoDecoder NOT available ✗', hasWC);
+
+      // 2. WASM init
+      try {
+        await init_strip();
+        out('outWasm', 'fox-strip-wasm initialised ✓', true);
+      } catch (e) {
+        out('outWasm', 'Init failed: ' + e, false);
+        return;
+      }
+
+      // 3. Fetch and scan
+      let bytes, scanJson, scan;
+      try {
+        const resp = await fetch('sample-files/test-video.mp4');
+        bytes = new Uint8Array(await resp.arrayBuffer());
+        scanJson = scan_keyframes(bytes);
+        scan = JSON.parse(scanJson);
+        out('outScan',
+          `OK ✓\ncodec: ${scan.config.codec}\nsize: ${scan.config.width}×${scan.config.height}\n` +
+          `description_b64 length: ${scan.config.description_b64.length}\n` +
+          `keyframes: ${scan.keyframes.length}\n` +
+          `duration_s: ${scan.duration_s.toFixed(2)}\n` +
+          `first kf: ts=${scan.keyframes[0]?.timestamp_s.toFixed(3)}s  offset=${scan.keyframes[0]?.byte_offset}  len=${scan.keyframes[0]?.byte_length}`,
+          true);
+      } catch (e) {
+        out('outScan', 'FAILED: ' + e, false);
+        return;
+      }
+
+      // 4. isConfigSupported
+      if (!hasWC) { out('outSupport', 'skipped — no WebCodecs', false); return; }
+      const cfg = {
+        codec: scan.config.codec,
+        codedWidth:  scan.config.width  || 320,
+        codedHeight: scan.config.height || 180,
+      };
+      if (scan.config.description_b64) {
+        const bin = atob(scan.config.description_b64);
+        const buf = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        cfg.description = buf;
+      }
+      try {
+        const sup = await VideoDecoder.isConfigSupported(cfg);
+        out('outSupport', JSON.stringify(sup, null, 2), sup.supported);
+      } catch (e) {
+        out('outSupport', 'isConfigSupported threw: ' + e, false);
+        return;
+      }
+
+      // 4b. Note fallback path if no WebCodecs
+      if (!hasWC) {
+        out('outSupport', 'WebCodecs not available — video-seek fallback will be used', null);
+      }
+
+      // 5. Decode first keyframe
+      const kf = scan.keyframes[0];
+      const dbgCanvas = document.getElementById('dbgCanvas');
+      dbgCanvas.width = 320; dbgCanvas.height = 180;
+      dbgCanvas.style.width = '320px'; dbgCanvas.style.height = '180px';
+
+      if (hasWC) {
+        // WebCodecs path
+        try {
+          const result = await new Promise((resolve, reject) => {
+            let settled = false;
+            const dec = new VideoDecoder({
+              output(frame) {
+                if (settled) { frame.close(); return; }
+                settled = true;
+                try {
+                  dbgCanvas.getContext('2d').drawImage(frame, 0, 0, 320, 180);
+                  frame.close();
+                  resolve('Frame decoded via WebCodecs ✓');
+                } catch (e2) { frame.close(); reject('Draw failed: ' + e2); }
+              },
+              error(e) { if (!settled) { settled = true; reject('Decoder error: ' + e); } }
+            });
+            dec.configure(cfg);
+            const chunkData = get_keyframe_bytes(bytes, kf.byte_offset, kf.byte_length);
+            dec.decode(new EncodedVideoChunk({ type:'key', timestamp: Math.round(kf.timestamp_s*1e6), data: chunkData }));
+            dec.flush().catch(e => { if (!settled) { settled = true; reject('flush: '+e); } });
+          });
+          out('outDecode', result, true);
+        } catch (e) {
+          out('outDecode', 'FAILED: ' + e, false);
+        }
+      } else {
+        // Video-seek fallback
+        try {
+          const resp2 = await fetch('sample-files/test-video.mp4');
+          const blob  = await resp2.blob();
+          const url   = URL.createObjectURL(blob);
+          const vid   = document.createElement('video');
+          vid.muted = true; vid.src = url;
+          await new Promise(r => vid.addEventListener('loadedmetadata', r, {once:true}));
+          await new Promise((resolve, reject) => {
+            vid.addEventListener('seeked', () => {
+              dbgCanvas.getContext('2d').drawImage(vid, 0, 0, 320, 180);
+              URL.revokeObjectURL(url);
+              resolve();
+            }, {once:true});
+            vid.currentTime = kf.timestamp_s;
+          });
+          out('outDecode', 'Frame captured via video-seek fallback ✓', true);
+        } catch(e) {
+          out('outDecode', 'FAILED: ' + e, false);
+        }
+      }
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+[package]
+name = "fox-soundwave-wasm"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+# default-features = false: skip opt-simd (SSE/AVX/NEON – meaningless in WASM)
+symphonia = { version = "0.6", default-features = false, features = [
+    "mp3",    # MP3
+    "aac",    # AAC (M4A / MP4 audio track)
+    "flac",   # FLAC lossless
+    "vorbis", # Ogg Vorbis
+    "pcm",    # PCM / uncompressed
+    "wav",    # WAV container
+    "ogg",    # OGG container
+    "isomp4", # MP4 / M4A container
+] }

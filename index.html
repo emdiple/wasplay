@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Shadowfox Editor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0d0f;
+      --panel:     #13141a;
+      --panel-2:   #0f1015;
+      --track:     #0a0b0e;
+      --border:    #1e2028;
+      --border-2:  #2e3038;
+      --text:      #c9cdd4;
+      --dim:       #5a6070;
+      --dim-2:     #3a4050;
+      --accent:    #4a9eff;
+      --ruler-h:   26px;
+      --vtrack-h:  92px;
+      --atrack-h:  64px;
+      --gutter-w:  40px;
+    }
+
+    html, body { height: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font: 13px/1.5 "SF Mono", "Fira Code", ui-monospace, monospace;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Top bar ─────────────────────────────────────────────── */
+    .topbar {
+      flex: 0 0 auto;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+    .logo {
+      font-size: 13px; font-weight: 600; letter-spacing: 0.14em;
+      color: #e8eaf0; text-transform: uppercase; white-space: nowrap;
+    }
+    .logo b { color: var(--accent); }
+
+    .toolbar-group { display: flex; align-items: center; gap: 6px; }
+    .sep { width: 1px; height: 22px; background: var(--border); }
+    .spacer { margin-left: auto; }
+
+    button.btn {
+      background: #1a1c24; border: 1px solid var(--border-2); color: var(--text);
+      padding: 6px 12px; border-radius: 6px; cursor: pointer; font: inherit;
+      display: inline-flex; align-items: center; gap: 6px; transition: all .15s;
+      white-space: nowrap;
+    }
+    button.btn:hover { border-color: var(--accent); color: #e8eaf0; }
+    button.btn.primary { background: rgba(74,158,255,.14); border-color: rgba(74,158,255,.5); color: #cfe4ff; }
+    button.btn.active  { background: rgba(74,158,255,.22); border-color: var(--accent); color: #fff; }
+    button.btn:disabled { opacity: .4; cursor: not-allowed; }
+    button.btn.icon { padding: 6px 9px; }
+
+    .zoom-label { color: var(--dim); font-size: 11px; min-width: 42px; text-align: center; }
+
+    /* ── Middle: bin + preview ───────────────────────────────── */
+    .middle {
+      flex: 1 1 auto;
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      min-height: 0;
+    }
+
+    .bin {
+      border-right: 1px solid var(--border);
+      background: var(--panel-2);
+      display: flex; flex-direction: column; min-height: 0;
+    }
+    .panel-head {
+      flex: 0 0 auto;
+      padding: 10px 14px;
+      font-size: 10px; text-transform: uppercase; letter-spacing: .12em;
+      color: var(--dim-2); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .panel-head .count { color: var(--dim); }
+    .bin-list { flex: 1 1 auto; overflow-y: auto; padding: 8px; }
+    .bin-empty {
+      color: var(--dim-2); font-size: 12px; text-align: center;
+      padding: 32px 12px; line-height: 1.8;
+    }
+    .bin-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px; border-radius: 6px; cursor: grab;
+      border: 1px solid transparent; user-select: none;
+    }
+    .bin-item:hover { background: #171922; border-color: var(--border); }
+    .bin-item.sel   { background: #171922; border-color: var(--border-2); }
+    .swatch { width: 12px; height: 30px; border-radius: 3px; flex: 0 0 auto; }
+    .bin-meta { min-width: 0; }
+    .bin-name { font-size: 12px; color: #dfe3ea; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bin-sub  { font-size: 10px; color: var(--dim); margin-top: 2px; }
+    .bin-sub .kind { color: var(--dim-2); }
+
+    .preview {
+      display: flex; flex-direction: column; min-height: 0;
+      background: radial-gradient(circle at 50% 40%, #131722 0%, var(--bg) 70%);
+    }
+    .stage {
+      flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
+      padding: 20px; min-height: 0; position: relative;
+    }
+    .stage-card {
+      display: flex; flex-direction: column; align-items: center; gap: 14px;
+      text-align: center; color: var(--dim);
+    }
+    .stage-swatch {
+      width: 120px; height: 68px; border-radius: 8px;
+      border: 1px solid rgba(255,255,255,.12);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; font-weight: 600; color: rgba(255,255,255,.85);
+    }
+    .stage-name { font-size: 13px; color: #dfe3ea; max-width: 60ch; word-break: break-all; }
+    .stage-hint { font-size: 12px; color: var(--dim-2); max-width: 46ch; line-height: 1.7; }
+    .timecode {
+      flex: 0 0 auto; text-align: center; padding: 10px;
+      font-size: 26px; font-weight: 600; letter-spacing: .06em; color: #e8eaf0;
+      border-top: 1px solid var(--border); background: var(--panel-2);
+    }
+    .timecode small { font-size: 12px; color: var(--dim); font-weight: 400; margin-left: 10px; letter-spacing: normal; }
+
+    /* ── Timeline ────────────────────────────────────────────── */
+    .timeline {
+      flex: 0 0 auto;
+      border-top: 1px solid var(--border);
+      background: var(--panel);
+      display: flex; flex-direction: column;
+    }
+    .tl-bar {
+      height: 34px; flex: 0 0 auto; display: flex; align-items: center; gap: 12px;
+      padding: 0 12px; border-bottom: 1px solid var(--border);
+      font-size: 11px; color: var(--dim);
+    }
+    .tl-bar .hint b { color: var(--dim); }
+    .tl-bar .hint kbd {
+      background: #1a1c24; border: 1px solid var(--border-2); border-radius: 4px;
+      padding: 1px 6px; color: var(--text); font-size: 10px;
+    }
+
+    .tl-body { display: flex; height: calc(var(--ruler-h) + var(--vtrack-h) + var(--atrack-h)); }
+
+    /* left gutter with track labels (does not scroll) */
+    .gutter { flex: 0 0 var(--gutter-w); border-right: 1px solid var(--border); background: var(--panel-2); }
+    .gutter .g-ruler { height: var(--ruler-h); border-bottom: 1px solid var(--border); }
+    .gutter .g-lab {
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 600; letter-spacing: .1em;
+      color: var(--dim-2); border-bottom: 1px solid var(--border);
+    }
+    .gutter .g-v { height: var(--vtrack-h); }
+    .gutter .g-a { height: var(--atrack-h); }
+
+    .tl-scroll { flex: 1 1 auto; overflow-x: auto; overflow-y: hidden; position: relative; }
+    .tl-content { position: relative; height: 100%; min-width: 100%; }
+
+    #rulerCanvas {
+      display: block; height: var(--ruler-h); width: 100%;
+      border-bottom: 1px solid var(--border); cursor: text;
+    }
+
+    .track {
+      position: relative; width: 100%;
+      border-bottom: 1px solid var(--border);
+      background:
+        repeating-linear-gradient(90deg, transparent 0, transparent 39px, rgba(255,255,255,.02) 39px, rgba(255,255,255,.02) 40px),
+        var(--track);
+    }
+    .track.video { height: var(--vtrack-h); }
+    .track.audio { height: var(--atrack-h); }
+    .track.cut-mode { cursor: crosshair; }
+
+    .clip {
+      position: absolute; top: 4px; bottom: 4px; left: 0; width: 0;
+      border-radius: 5px; overflow: hidden; cursor: grab;
+      border: 1px solid rgba(255,255,255,.14);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.25);
+      user-select: none;
+    }
+    .clip.dragging { cursor: grabbing; z-index: 5; }
+    .clip.sel { box-shadow: 0 0 0 2px #fff, inset 0 0 0 1px rgba(0,0,0,.25); z-index: 4; }
+    .clip-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    .clip-label {
+      position: absolute; top: 0; left: 0; right: 0;
+      font-size: 10px; padding: 2px 6px; color: rgba(255,255,255,.92);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      background: linear-gradient(180deg, rgba(0,0,0,.45), rgba(0,0,0,0));
+      pointer-events: none; text-shadow: 0 1px 2px rgba(0,0,0,.6);
+    }
+
+    /* marquee (rubber-band) selection box */
+    .marquee {
+      position: absolute; z-index: 8; pointer-events: none;
+      border: 1px solid var(--accent);
+      background: rgba(74, 158, 255, .14);
+    }
+
+    /* playhead spans ruler + both tracks */
+    .playhead {
+      position: absolute; top: 0; width: 0; pointer-events: none;
+      height: calc(var(--ruler-h) + var(--vtrack-h) + var(--atrack-h));
+      border-left: 1px solid #ff5a5a; z-index: 10;
+    }
+    .playhead::before {
+      content: ''; position: absolute; top: 0; left: -5px;
+      border-left: 5px solid transparent; border-right: 5px solid transparent;
+      border-top: 7px solid #ff5a5a;
+    }
+
+    /* drop overlay */
+    .drop-overlay {
+      position: fixed; inset: 0; z-index: 50; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(10,12,20,.82); backdrop-filter: blur(2px);
+      border: 2px dashed var(--accent); border-radius: 12px;
+      font-size: 16px; color: #cfe4ff; letter-spacing: .04em;
+    }
+    body.dragging-file .drop-overlay { display: flex; }
+
+    /* loading lock — blocks the whole app while media decodes */
+    .loading-overlay {
+      position: fixed; inset: 0; z-index: 60; display: none;
+      flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+      background: rgba(9, 11, 17, .86); backdrop-filter: blur(3px);
+      color: #cfe4ff; cursor: progress;
+    }
+    body.busy .loading-overlay { display: flex; }
+    .spinner {
+      width: 36px; height: 36px; border-radius: 50%;
+      border: 3px solid rgba(255, 255, 255, .14); border-top-color: var(--accent);
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-msg { font-size: 13px; letter-spacing: .03em; }
+    .loading-sub { font-size: 11px; color: var(--dim); }
+
+    #status { font-size: 11px; color: var(--dim); }
+
+    .bin-list::-webkit-scrollbar, .tl-scroll::-webkit-scrollbar { height: 10px; width: 10px; }
+    .bin-list::-webkit-scrollbar-thumb, .tl-scroll::-webkit-scrollbar-thumb {
+      background: #23262f; border-radius: 6px; border: 2px solid var(--panel-2);
+    }
+  </style>
+</head>
+<body>
+  <input type="file" id="fileInput" accept="audio/*,video/*" multiple hidden />
+
+  <!-- Top bar -->
+  <header class="topbar">
+    <div class="logo">Shadow<b>fox</b> · Editor</div>
+
+    <div class="toolbar-group">
+      <button class="btn primary" id="btnImport">＋ Import media</button>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="toolbar-group" id="tools">
+      <button class="btn active icon" id="toolSelect" title="Select / move (V)">▲ Select</button>
+      <button class="btn icon" id="toolCut" title="Cut / razor (C)">✂ Cut</button>
+      <button class="btn icon" id="btnDelete" title="Delete selected (⌫)">🗑 Delete</button>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="toolbar-group">
+      <button class="btn icon" id="btnPlay" title="Play / pause (Space)">▶</button>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="toolbar-group">
+      <button class="btn icon" id="zoomOut" title="Zoom out">－</button>
+      <span class="zoom-label" id="zoomLabel">40 px/s</span>
+      <button class="btn icon" id="zoomIn" title="Zoom in">＋</button>
+    </div>
+
+    <div class="sep"></div>
+    <button class="btn icon" id="btnClear" title="Clear timeline">Clear</button>
+    <span id="status">Ready — import media to begin.</span>
+  </header>
+
+  <!-- Middle: media bin + preview -->
+  <section class="middle">
+    <aside class="bin">
+      <div class="panel-head">
+        <span>Media Bin</span>
+        <span class="count" id="binCount">0</span>
+      </div>
+      <div class="bin-list" id="binList">
+        <div class="bin-empty">No media yet.<br />Import files, then double-click to<br />add them to the timeline.</div>
+      </div>
+    </aside>
+
+    <div class="preview">
+      <div class="stage">
+        <div class="stage-card" id="stageCard">
+          <div class="stage-swatch" id="stageSwatch" style="background:#1a1c24">◎</div>
+          <div class="stage-name" id="stageName">Shadowfox Editor</div>
+          <div class="stage-hint" id="stageHint">
+            Import multiple audio/video files. Each file gets its own colour — its
+            video and audio share that colour on the single-layer timeline below.
+          </div>
+        </div>
+      </div>
+      <div class="timecode">
+        <span id="tcMain">00:00:00.00</span>
+        <small id="tcTotal">/ 00:00:00.00</small>
+      </div>
+    </div>
+  </section>
+
+  <!-- Timeline -->
+  <section class="timeline">
+    <div class="tl-bar">
+      <span class="hint"><b>Double-click</b> bin to append · <b>Drag</b> empty area to marquee-select · <kbd>⇧</kbd> add · <b>Drag</b> clips to move · <kbd>C</kbd> razor (cuts at playhead) · <kbd>S</kbd> split all · <kbd>⌫</kbd> delete · <kbd>Space</kbd> play</span>
+    </div>
+    <div class="tl-body">
+      <div class="gutter">
+        <div class="g-ruler"></div>
+        <div class="g-lab g-v">V</div>
+        <div class="g-lab g-a">A</div>
+      </div>
+      <div class="tl-scroll" id="tlScroll">
+        <div class="tl-content" id="tlContent">
+          <canvas id="rulerCanvas"></canvas>
+          <div class="track video" id="videoTrack"></div>
+          <div class="track audio" id="audioTrack"></div>
+          <div class="playhead" id="playhead"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="drop-overlay">Drop media to import</div>
+
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="loading-msg" id="loadingMsg">Loading media…</div>
+    <div class="loading-sub">Decoding waveform &amp; thumbnails — please wait</div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
