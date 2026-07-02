@@ -1,5 +1,26 @@
 # Rust build output (workspace root + any per-crate target dirs)
 target/
 
-# macOS
+# Node / Vite
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Generated wasm-pack output (rebuild with `npm run wasm`)
+src/wasm/pkg/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor / OS
 .DS_Store
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
