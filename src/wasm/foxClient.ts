@@ -1,0 +1,99 @@
+/**
+ * foxClient.ts — main-thread RPC client for the media worker pool.
+ *
+ * Spins up a small pool of module workers on first use (real OS-thread
+ * parallelism — each worker is an independent WASM instance) and exposes a
+ * small promise-based API. Every call passes the `File` (a cheap by-reference
+ * clone) so a worker can stream bytes with `FileReaderSync` — the main thread
+ * never reads the file itself.
+ *
+ * `foxWorker.ts` is fully stateless per call (no state carries between
+ * requests), so any worker in the pool can serve any request — dispatch picks
+ * whichever worker currently has the fewest requests in flight, since job
+ * duration varies wildly (LUFS on a long file vs. a small keyframe fetch).
+ */
+
+import type { FoxOp, FoxOps, FoxRequest, FoxResponse } from './protocol'
+
+interface Pending {
+  resolve: (value: unknown) => void
+  reject: (reason: Error) => void
+  workerIndex: number
+}
+
+const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
+
+// Each pool worker lazily instantiates its own WASM modules (own linear
+// memory), so growing the pool isn't free — cap it well below most machines'
+// core count. Floor of 2 guarantees real parallelism even where
+// hardwareConcurrency under-reports.
+const POOL_SIZE = clamp(navigator.hardwareConcurrency || 4, 2, 6)
+
+const workers: (Worker | null)[] = new Array(POOL_SIZE).fill(null)
+const inFlight: number[] = new Array(POOL_SIZE).fill(0)
+let seq = 0
+const pending = new Map<number, Pending>()
+
+function makeWorker(index: number): Worker {
+  const w = new Worker(new URL('./foxWorker.ts', import.meta.url), { type: 'module' })
+
+  w.onmessage = (e: MessageEvent<FoxResponse>) => {
+    const msg = e.data
+    const p = pending.get(msg.id)
+    if (!p) return
+    pending.delete(msg.id)
+    inFlight[p.workerIndex] = Math.max(0, inFlight[p.workerIndex] - 1)
+    if (msg.ok) p.resolve(msg.result)
+    else p.reject(new Error(msg.error))
+  }
+
+  // A fatal worker error (e.g. failed module import) rejects only this
+  // worker's in-flight requests; the slot is recreated on next dispatch.
+  w.onerror = (e) => {
+    const message = e.message || 'fox-worker crashed'
+    for (const [id, p] of pending) {
+      if (p.workerIndex !== index) continue
+      pending.delete(id)
+      p.reject(new Error(message))
+    }
+    inFlight[index] = 0
+    workers[index] = null
+  }
+
+  return w
+}
+
+/** Index of the worker with the fewest requests in flight (creating any unstarted slots as needed). */
+function pickWorker(): number {
+  let best = 0
+  for (let i = 1; i < POOL_SIZE; i++) {
+    if (inFlight[i] < inFlight[best]) best = i
+  }
+  if (!workers[best]) workers[best] = makeWorker(best)
+  return best
+}
+
+function call<Op extends FoxOp>(op: Op, file: File, args: FoxOps[Op]['args']): Promise<FoxOps[Op]['result']> {
+  const workerIndex = pickWorker()
+  const w = workers[workerIndex]!
+  const id = ++seq
+  inFlight[workerIndex]++
+  return new Promise<FoxOps[Op]['result']>((resolve, reject) => {
+    pending.set(id, { resolve: resolve as (v: unknown) => void, reject, workerIndex })
+    const request: FoxRequest<Op> = { id, op, file, args }
+    w.postMessage(request)
+  })
+}
+
+export const fox = {
+  /** Probe container / codec info. */
+  mediaInfo: (file: File) => call('mediaInfo', file, {}),
+  /** Integrated loudness in LUFS. */
+  lufs: (file: File) => call('lufs', file, {}),
+  /** Waveform peaks in [0,1] — a Float32Array of length `numPeaks`. */
+  peaks: (file: File, numPeaks: number) => call('peaks', file, { numPeaks }),
+  /** Scan keyframes + pick `count` evenly-spaced ones. */
+  scan: (file: File, count: number) => call('scan', file, { count }),
+  /** Raw bytes of one encoded sample. */
+  keyframeBytes: (file: File, offset: number, length: number) => call('keyframeBytes', file, { offset, length }),
+}
