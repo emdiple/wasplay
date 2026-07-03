@@ -11,6 +11,19 @@ export function useKeyboardShortcuts(transport: TransportControls): void {
       const target = e.target as HTMLElement
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
 
+      // Undo/redo: Cmd/Ctrl+Z, and Cmd+Shift+Z or Ctrl+Y to redo.
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault()
+        if (e.shiftKey) store.redo()
+        else store.undo()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault()
+        store.redo()
+        return
+      }
+
       switch (e.key) {
         case 'v':
         case 'V':

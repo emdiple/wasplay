@@ -315,6 +315,30 @@ button.btn.icon {
 .bin-sub .kind {
   color: var(--dim-2);
 }
+.bin-delete {
+  flex: 0 0 auto;
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.bin-item:hover .bin-delete {
+  opacity: 1;
+}
+.bin-delete:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
 
 .preview {
   display: flex;

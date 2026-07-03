@@ -21,6 +21,10 @@ export function TopBar({ importFiles }: TopBarProps) {
   const setExportOpen = useEditorStore((s) => s.setExportOpen)
   const theme = useEditorStore((s) => s.theme)
   const toggleTheme = useEditorStore((s) => s.toggleTheme)
+  const undo = useEditorStore((s) => s.undo)
+  const redo = useEditorStore((s) => s.redo)
+  const canUndo = useEditorStore((s) => s.past.length > 0)
+  const canRedo = useEditorStore((s) => s.future.length > 0)
 
   const zoomLabel = (pxPerSec < 10 ? pxPerSec.toFixed(1) : Math.round(pxPerSec)) + ' px/s'
 
@@ -48,6 +52,17 @@ export function TopBar({ importFiles }: TopBarProps) {
       <div className="toolbar-group">
         <button className="btn primary" onClick={() => fileInputRef.current?.click()}>
           ＋ Import media
+        </button>
+      </div>
+
+      <div className="sep" />
+
+      <div className="toolbar-group">
+        <button className="btn icon" title="Undo (⌘Z)" onClick={undo} disabled={!canUndo}>
+          ↶ Undo
+        </button>
+        <button className="btn icon" title="Redo (⇧⌘Z)" onClick={redo} disabled={!canRedo}>
+          ↷ Redo
         </button>
       </div>
 

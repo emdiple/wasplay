@@ -35,6 +35,10 @@ function BinItem({ src }: { src: Source }) {
   const selectedSrcId = useEditorStore((s) => s.selectedSrcId)
   const setStage = useEditorStore((s) => s.setStage)
   const appendSource = useEditorStore((s) => s.appendSource)
+  const deleteMedia = useEditorStore((s) => s.deleteMedia)
+  const clipCount = useEditorStore(
+    (s) => s.videoClips.filter((c) => c.sourceId === src.id).length + s.audioClips.filter((c) => c.sourceId === src.id).length,
+  )
   const { zoom } = useControls()
 
   const kind = src.isVideo ? (src.hasAudio ? 'video' : 'video · silent') : 'audio'
@@ -62,6 +66,16 @@ function BinItem({ src }: { src: Source }) {
           {dims}
         </div>
       </div>
+      <button
+        className="bin-delete"
+        title={clipCount ? `Remove media and its ${clipCount} clip(s) from the timeline` : 'Remove media'}
+        onClick={(e) => {
+          e.stopPropagation() // don't also select the item
+          deleteMedia(src.id)
+        }}
+      >
+        ✕
+      </button>
     </div>
   )
 }

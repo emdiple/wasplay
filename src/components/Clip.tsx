@@ -76,12 +76,17 @@ export function Clip({ clip, isVideo }: ClipProps) {
       if (selectedIds.has(c.id)) origins.set(c.id, c.start)
     }
     let moved = false
+    let didSnapshot = false // capture one undo entry per drag, only once it actually moves
     el.setPointerCapture(e.pointerId)
 
     const onMove = (ev: PointerEvent) => {
       const dx = ev.clientX - startX
       if (Math.abs(dx) > 3) moved = true
       if (tool !== 'select' || !moved) return
+      if (!didSnapshot) {
+        useEditorStore.getState().snapshot()
+        didSnapshot = true
+      }
 
       el.classList.add('dragging')
       el.style.zIndex = String(DRAGGING_Z_BOOST)

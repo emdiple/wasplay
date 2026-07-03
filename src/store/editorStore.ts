@@ -21,6 +21,15 @@ export interface ContextMenuState {
   y: number
 }
 
+/** The undoable "document" — the parts of state that edits change. */
+interface Doc {
+  sources: Source[]
+  videoClips: Clip[]
+  audioClips: Clip[]
+}
+
+const HISTORY_LIMIT = 100
+
 interface EditorState {
   // ── Model ──
   sources: Source[]
@@ -31,6 +40,10 @@ interface EditorState {
   analyzerSrcId: string | null // source open in the analyzer panel (null = closed)
   contextMenu: ContextMenuState | null
   exportOpen: boolean // whether the export dialog is open
+
+  // ── Undo/redo ──
+  past: Doc[]
+  future: Doc[]
 
   // ── View / transport ──
   tool: Tool
@@ -45,9 +58,17 @@ interface EditorState {
   loadingMsg: string
   status: string
 
+  // ── Undo/redo actions ──
+  /** Capture the current document onto the undo stack (call before a mutating gesture). */
+  snapshot: () => void
+  undo: () => void
+  redo: () => void
+
   // ── Source actions ──
   addSource: (src: Source) => void
   updateSource: (id: string, patch: Partial<Source>) => void
+  /** Remove a source from the bin along with every clip that references it. */
+  deleteMedia: (srcId: string) => void
   setStage: (srcId: string) => void
   openAnalyzer: (srcId: string) => void
   closeAnalyzer: () => void
@@ -104,6 +125,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   analyzerSrcId: null,
   contextMenu: null,
   exportOpen: false,
+  past: [],
+  future: [],
 
   tool: 'select',
   pxPerSec: 40,
@@ -115,6 +138,51 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   busy: false,
   loadingMsg: 'Loading media…',
   status: 'Ready — import media to begin.',
+
+  snapshot: () =>
+    set((state) => ({
+      past: [
+        ...state.past,
+        { sources: state.sources, videoClips: state.videoClips, audioClips: state.audioClips },
+      ].slice(-HISTORY_LIMIT),
+      future: [], // a new edit invalidates the redo stack
+    })),
+
+  undo: () =>
+    set((state) => {
+      const prev = state.past[state.past.length - 1]
+      if (!prev) return {}
+      const current: Doc = {
+        sources: state.sources,
+        videoClips: state.videoClips,
+        audioClips: state.audioClips,
+      }
+      return {
+        ...prev,
+        past: state.past.slice(0, -1),
+        future: [...state.future, current],
+        selection: new Set(), // ids from the other timeline may not exist here
+        contextMenu: null,
+      }
+    }),
+
+  redo: () =>
+    set((state) => {
+      const next = state.future[state.future.length - 1]
+      if (!next) return {}
+      const current: Doc = {
+        sources: state.sources,
+        videoClips: state.videoClips,
+        audioClips: state.audioClips,
+      }
+      return {
+        ...next,
+        past: [...state.past, current],
+        future: state.future.slice(0, -1),
+        selection: new Set(),
+        contextMenu: null,
+      }
+    }),
 
   addSource: (src) =>
     set((state) => ({
@@ -128,6 +196,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       sources: state.sources.map((s) => (s.id === id ? { ...s, ...patch } : s)),
     })),
 
+  deleteMedia: (srcId) => {
+    const state = get()
+    if (!state.sources.some((s) => s.id === srcId)) return
+    state.snapshot()
+    const removedClipIds = new Set(
+      [...state.videoClips, ...state.audioClips].filter((c) => c.sourceId === srcId).map((c) => c.id),
+    )
+    set((s) => ({
+      sources: s.sources.filter((src) => src.id !== srcId),
+      videoClips: s.videoClips.filter((c) => c.sourceId !== srcId),
+      audioClips: s.audioClips.filter((c) => c.sourceId !== srcId),
+      selection: new Set([...s.selection].filter((id) => !removedClipIds.has(id))),
+      selectedSrcId: s.selectedSrcId === srcId ? null : s.selectedSrcId,
+      analyzerSrcId: s.analyzerSrcId === srcId ? null : s.analyzerSrcId,
+    }))
+  },
+
   setStage: (srcId) => set({ selectedSrcId: srcId }),
   openAnalyzer: (srcId) => set({ analyzerSrcId: srcId }),
   closeAnalyzer: () => set({ analyzerSrcId: null }),
@@ -135,6 +220,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   placeSource: (srcId, at) => {
     const src = sourceById(get().sources, srcId)
     if (!src) return
+    get().snapshot()
     const start = Math.max(0, at)
     const link = uid() // a file's video + audio clips share a link id
     set((state) => {
@@ -161,6 +247,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { videoClips, audioClips } = get()
     const res = splitLinkGroupAt(videoClips, audioClips, link, t)
     if (!res.rights.length) return false
+    get().snapshot()
     set({
       videoClips: res.video,
       audioClips: res.audio,
@@ -184,28 +271,36 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     }
     if (didCut) {
+      get().snapshot()
       set({ videoClips: video, audioClips: audio, selection: new Set(), status: `Split at ${formatTC(playheadTime)}` })
     }
   },
 
-  deleteSelected: () =>
-    set((state) => {
-      if (!state.selection.size) return {}
-      return {
-        videoClips: state.videoClips.filter((c) => !state.selection.has(c.id)),
-        audioClips: state.audioClips.filter((c) => !state.selection.has(c.id)),
-        selection: new Set(),
-      }
-    }),
+  deleteSelected: () => {
+    if (!get().selection.size) return
+    get().snapshot()
+    set((state) => ({
+      videoClips: state.videoClips.filter((c) => !state.selection.has(c.id)),
+      audioClips: state.audioClips.filter((c) => !state.selection.has(c.id)),
+      selection: new Set(),
+    }))
+  },
 
-  clearTimeline: () => set({ videoClips: [], audioClips: [], selection: new Set(), playheadTime: 0 }),
+  clearTimeline: () => {
+    const { videoClips, audioClips } = get()
+    if (!videoClips.length && !audioClips.length) return
+    get().snapshot()
+    set({ videoClips: [], audioClips: [], selection: new Set(), playheadTime: 0 })
+  },
 
-  detachPartner: (clipId) =>
+  detachPartner: (clipId) => {
+    const s = get()
+    const clip = [...s.videoClips, ...s.audioClips].find((c) => c.id === clipId)
+    if (!clip) return
+    const partner = linkedPartner(clip, s.videoClips, s.audioClips)
+    if (!partner) return
+    get().snapshot()
     set((state) => {
-      const clip = [...state.videoClips, ...state.audioClips].find((c) => c.id === clipId)
-      if (!clip) return {}
-      const partner = linkedPartner(clip, state.videoClips, state.audioClips)
-      if (!partner) return {}
       const onVideoTrack = state.videoClips.some((c) => c.id === clipId)
       const newLink = uid()
       const patch = (clips: Clip[]) => clips.map((c) => (c.id === partner.id ? { ...c, link: newLink } : c))
@@ -216,15 +311,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return onVideoTrack
         ? { audioClips: patch(state.audioClips), selection }
         : { videoClips: patch(state.videoClips), selection }
-    }),
+    })
+  },
 
-  linkClips: (idA, idB) =>
+  linkClips: (idA, idB) => {
+    const s = get()
+    const aVideo = s.videoClips.some((c) => c.id === idA)
+    const bVideo = s.videoClips.some((c) => c.id === idB)
+    const aFound = aVideo || s.audioClips.some((c) => c.id === idA)
+    const bFound = bVideo || s.audioClips.some((c) => c.id === idB)
+    if (!aFound || !bFound || aVideo === bVideo) return // need exactly one video + one audio
+    get().snapshot()
     set((state) => {
-      const aVideo = state.videoClips.some((c) => c.id === idA)
-      const bVideo = state.videoClips.some((c) => c.id === idB)
-      const aFound = aVideo || state.audioClips.some((c) => c.id === idA)
-      const bFound = bVideo || state.audioClips.some((c) => c.id === idB)
-      if (!aFound || !bFound || aVideo === bVideo) return {} // need exactly one video + one audio
       const newLink = uid()
       const relink = (clips: Clip[]) =>
         clips.map((c) => (c.id === idA || c.id === idB ? { ...c, link: newLink } : c))
@@ -234,9 +332,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         audioClips: relink(state.audioClips),
         selection: new Set([idA, idB]),
       }
-    }),
+    })
+  },
 
-  bringToFront: (clipId) =>
+  bringToFront: (clipId) => {
+    get().snapshot()
     set((state) => {
       const onVideoTrack = state.videoClips.some((c) => c.id === clipId)
       const clips = onVideoTrack ? state.videoClips : state.audioClips
@@ -245,16 +345,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const maxZ = clips.reduce((m, c) => Math.max(m, c.z), clips[0]?.z ?? 0)
       const bump = (arr: Clip[]) => arr.map((c) => (c.id === clipId ? { ...c, z: maxZ + 1 } : c))
       return onVideoTrack ? { videoClips: bump(state.videoClips) } : { audioClips: bump(state.audioClips) }
-    }),
+    })
+  },
 
-  sendToBack: (clipId) =>
+  sendToBack: (clipId) => {
+    get().snapshot()
     set((state) => {
       const onVideoTrack = state.videoClips.some((c) => c.id === clipId)
       const clips = onVideoTrack ? state.videoClips : state.audioClips
       const minZ = clips.reduce((m, c) => Math.min(m, c.z), clips[0]?.z ?? 0)
       const bump = (arr: Clip[]) => arr.map((c) => (c.id === clipId ? { ...c, z: minZ - 1 } : c))
       return onVideoTrack ? { videoClips: bump(state.videoClips) } : { audioClips: bump(state.audioClips) }
-    }),
+    })
+  },
 
   openContextMenu: (clipId, x, y) => set({ contextMenu: { clipId, x, y } }),
   closeContextMenu: () => set({ contextMenu: null }),
