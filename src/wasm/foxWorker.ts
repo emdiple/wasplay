@@ -15,6 +15,7 @@ import initEar, { get_media_info_streaming, measure_lufs_streaming } from './pkg
 import initWave, { extract_peaks_streaming } from './pkg/fox-soundwave-wasm/fox_soundwave_wasm.js'
 import initStrip, {
   scan_keyframes_streaming,
+  scan_samples_streaming,
   get_keyframe_bytes_streaming,
   select_thumbnail_keyframes,
 } from './pkg/fox-strip-wasm/fox_strip_wasm.js'
@@ -78,6 +79,11 @@ self.onmessage = async (e: MessageEvent<FoxRequest>) => {
         const scanJson = scan_keyframes_streaming(read, file.size)
         const selected = JSON.parse(select_thumbnail_keyframes(scanJson, (args as { count: number }).count))
         result = { scan: JSON.parse(scanJson), selected }
+        break
+      }
+      case 'sampleTable': {
+        await ensure('strip')
+        result = JSON.parse(scan_samples_streaming(read, file.size))
         break
       }
       case 'keyframeBytes': {

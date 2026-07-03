@@ -94,6 +94,8 @@ export const fox = {
   peaks: (file: File, numPeaks: number) => call('peaks', file, { numPeaks }),
   /** Scan keyframes + pick `count` evenly-spaced ones. */
   scan: (file: File, count: number) => call('scan', file, { count }),
-  /** Raw bytes of one encoded sample. */
+  /** Full video sample table (every frame) for demux-based decode. */
+  sampleTable: (file: File) => call('sampleTable', file, {}),
+  /** Raw bytes of one encoded sample (any byte range). */
   keyframeBytes: (file: File, offset: number, length: number) => call('keyframeBytes', file, { offset, length }),
 }

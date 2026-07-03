@@ -41,6 +41,29 @@ pub struct ScanResult {
     pub duration_s: f64,
 }
 
+/// One encoded video sample (frame), in decode order — everything WebCodecs
+/// `VideoDecoder` needs to decode it sequentially (no `<video>` seeking).
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SampleInfo {
+    /// Presentation timestamp in seconds (DTS + composition offset from `ctts`).
+    /// This is the timestamp to stamp on the `EncodedVideoChunk`.
+    pub pts_s: f64,
+    /// Decode timestamp in seconds (samples are listed in DTS order).
+    pub dts_s: f64,
+    pub byte_offset: u64,
+    pub byte_length: u32,
+    pub is_keyframe: bool,
+}
+
+/// Full sample table returned by `scan_samples` — the demuxer output that feeds
+/// a `VideoDecoder`-based render, replacing per-frame `<video>` seeking.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SampleTable {
+    pub config: CodecConfig,
+    pub samples: Vec<SampleInfo>,
+    pub duration_s: f64,
+}
+
 // ── WASM exports ──────────────────────────────────────────────────────────────
 
 /// Scan an MP4 byte buffer and return codec configuration + keyframe locations.
@@ -61,6 +84,15 @@ pub struct ScanResult {
 #[wasm_bindgen]
 pub fn scan_keyframes(mp4_bytes: &[u8]) -> Result<String, JsValue> {
     scan_inner(mp4_bytes).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Scan an MP4 and return the **full** video sample table (every frame, in decode
+/// order, with PTS/DTS, byte range, and keyframe flag) plus codec config — the
+/// demuxer output for a `VideoDecoder`-based render. Sample bytes are read on
+/// demand via [`get_keyframe_bytes`] / [`get_keyframe_bytes_streaming`].
+#[wasm_bindgen]
+pub fn scan_samples(mp4_bytes: &[u8]) -> Result<String, JsValue> {
+    samples_inner(mp4_bytes).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Extract the raw bytes of a single keyframe by its scan-result index.
@@ -99,6 +131,14 @@ pub fn scan_keyframes_streaming(
 ) -> Result<String, JsValue> {
     let moov = find_moov(&read_fn, file_len as u64).map_err(|e| JsValue::from_str(&e))?;
     scan_inner(&moov).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Streaming variant of [`scan_samples`] — reads only the `moov` box via the
+/// callback, so the multi-gigabyte `mdat` is never loaded to build the table.
+#[wasm_bindgen]
+pub fn scan_samples_streaming(read_fn: js_sys::Function, file_len: f64) -> Result<String, JsValue> {
+    let moov = find_moov(&read_fn, file_len as u64).map_err(|e| JsValue::from_str(&e))?;
+    samples_inner(&moov).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Streaming variant of [`get_keyframe_bytes`]. Reads a single sample's byte range
@@ -211,6 +251,19 @@ fn scan_inner(data: &[u8]) -> Result<String, String> {
     serde_json::to_string(&result).map_err(|e| e.to_string())
 }
 
+fn samples_inner(data: &[u8]) -> Result<String, String> {
+    let mut parser = Mp4Parser::new(data);
+    parser.parse()?;
+
+    let result = SampleTable {
+        config: parser.config,
+        samples: parser.samples,
+        duration_s: parser.duration_s,
+    };
+
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
 // ── Minimal MP4 parser ────────────────────────────────────────────────────────
 // Parses just enough of the ISO Base Media File Format (ISOBMFF) to locate
 // keyframe sample offsets without decoding any video pixels.
@@ -219,6 +272,7 @@ struct Mp4Parser<'a> {
     data: &'a [u8],
     config: CodecConfig,
     keyframes: Vec<KeyframeInfo>,
+    samples: Vec<SampleInfo>,
     duration_s: f64,
 }
 
@@ -233,6 +287,7 @@ impl<'a> Mp4Parser<'a> {
                 height: 0,
             },
             keyframes: Vec::new(),
+            samples: Vec::new(),
             duration_s: 0.0,
         }
     }
@@ -377,6 +432,7 @@ impl<'a> Mp4Parser<'a> {
         let mut stsz_data: Option<(usize, usize)> = None;
         let mut stco_data: Option<(usize, usize)> = None;
         let mut co64_data: Option<(usize, usize)> = None;
+        let mut ctts_data: Option<(usize, usize)> = None;
 
         let mut pos = start;
         while pos + 8 <= end.min(self.data.len()) {
@@ -393,6 +449,7 @@ impl<'a> Mp4Parser<'a> {
                 b"stsz" => { stsz_data = Some((inner, box_end)); }
                 b"stco" => { stco_data = Some((inner, box_end)); }
                 b"co64" => { co64_data = Some((inner, box_end)); }
+                b"ctts" => { ctts_data = Some((inner, box_end)); }
                 _ => {}
             }
             pos = box_end;
@@ -408,6 +465,7 @@ impl<'a> Mp4Parser<'a> {
         let stss = stss_data.map(|(p, e)| parse_stss(self.data, p, e)).transpose()?;
         let stsc = stsc_data.map(|(p, e)| parse_stsc(self.data, p, e)).transpose()?;
         let stsz = stsz_data.map(|(p, e)| parse_stsz(self.data, p, e)).transpose()?;
+        let ctts = ctts_data.map(|(p, e)| parse_ctts(self.data, p, e)).transpose()?;
 
         let chunk_offsets: Option<Vec<u64>> = if let Some((p, e)) = co64_data {
             Some(parse_co64(self.data, p, e)?)
@@ -467,7 +525,35 @@ impl<'a> Mp4Parser<'a> {
             vec![true; sample_count as usize]
         };
 
+        // Expand ctts into a per-sample composition offset (0 when absent).
+        let sample_cts: Vec<i64> = if let Some(entries) = &ctts {
+            let mut v = Vec::with_capacity(sample_count as usize);
+            for (count, offset) in entries {
+                for _ in 0..*count {
+                    v.push(*offset);
+                }
+            }
+            v
+        } else {
+            vec![0i64; sample_count as usize]
+        };
+
         let ts = timescale.max(1) as f64;
+
+        // Full per-sample table (all samples, in decode order) for VideoDecoder.
+        for i in 0..sample_count as usize {
+            let dts_val = sample_dts.get(i).copied().unwrap_or(0) as i64;
+            let cts = sample_cts.get(i).copied().unwrap_or(0);
+            let pts = (dts_val + cts).max(0);
+            self.samples.push(SampleInfo {
+                pts_s: pts as f64 / ts,
+                dts_s: dts_val as f64 / ts,
+                byte_offset: sample_byte_offsets.get(i).copied().unwrap_or(0),
+                byte_length: stsz.get(i).copied().unwrap_or(0),
+                is_keyframe: is_keyframe.get(i).copied().unwrap_or(false),
+            });
+        }
+
         let mut kf_index = 0u32;
 
         for (sample_num, is_kf) in is_keyframe.iter().enumerate() {
@@ -572,6 +658,22 @@ fn parse_stts(data: &[u8], pos: usize, _end: usize) -> Result<Vec<(u32, u32)>, S
         let sample_count = read_u32(data, base + i * 8)?;
         let sample_delta = read_u32(data, base + i * 8 + 4)?;
         out.push((sample_count, sample_delta));
+    }
+    Ok(out)
+}
+
+fn parse_ctts(data: &[u8], pos: usize, _end: usize) -> Result<Vec<(u32, i64)>, String> {
+    // version(1) + flags(3) + entry_count(4) + entries[(sample_count(4), offset(4))]
+    // version 0 stores offset as u32; version 1 as i32. Read raw and reinterpret.
+    let version = data.get(pos).copied().unwrap_or(0);
+    let count = read_u32(data, pos + 4)? as usize;
+    let base = pos + 8;
+    let mut out = Vec::with_capacity(count);
+    for i in 0..count {
+        let sample_count = read_u32(data, base + i * 8)?;
+        let raw = read_u32(data, base + i * 8 + 4)?;
+        let offset = if version == 0 { raw as i64 } else { raw as i32 as i64 };
+        out.push((sample_count, offset));
     }
     Ok(out)
 }
@@ -735,6 +837,46 @@ mod tests {
         let mp4 = minimal_mp4();
         let result = scan_inner(&mp4);
         assert!(result.is_err(), "expected error for ftyp-only buffer");
+    }
+
+    #[test]
+    fn parse_ctts_version0_unsigned() {
+        // version 0, flags 0, entry_count 1, entry (sample_count=3, offset=10)
+        let data = [0u8, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 10];
+        assert_eq!(parse_ctts(&data, 0, data.len()).unwrap(), vec![(3, 10)]);
+    }
+
+    #[test]
+    fn parse_ctts_version1_signed() {
+        // version 1 → offset is i32; 0xFFFFFFFF == -1
+        let data = [1u8, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0xFF, 0xFF, 0xFF, 0xFF];
+        assert_eq!(parse_ctts(&data, 0, data.len()).unwrap(), vec![(2, -1)]);
+    }
+
+    #[test]
+    fn samples_inner_ftyp_only_errors() {
+        assert!(samples_inner(&minimal_mp4()).is_err());
+    }
+
+    #[test]
+    fn real_mp4_full_sample_table() {
+        // Validate the demuxer against actual footage, not just synthetic boxes.
+        let bytes = include_bytes!("../../../public/sample-files/test-video.mp4");
+        let table: SampleTable = serde_json::from_str(&samples_inner(bytes).unwrap()).unwrap();
+
+        // Many frames, first is a keyframe, PTS is non-negative and starts at ~0.
+        assert!(table.samples.len() > 30, "got {} samples", table.samples.len());
+        assert!(table.samples[0].is_keyframe);
+        assert!(table.samples.iter().all(|s| s.pts_s >= 0.0));
+
+        // Keyframe count in the full table matches the keyframe-only scan.
+        let scan: ScanResult = serde_json::from_str(&scan_inner(bytes).unwrap()).unwrap();
+        let kf_in_table = table.samples.iter().filter(|s| s.is_keyframe).count();
+        assert_eq!(kf_in_table, scan.keyframes.len());
+
+        // Codec config is usable for VideoDecoder.
+        assert!(table.config.codec.starts_with("avc1"));
+        assert!(!table.config.description_b64.is_empty());
     }
 
     #[test]

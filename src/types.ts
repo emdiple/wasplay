@@ -41,6 +41,24 @@ export interface ScanResult {
   duration_s: number
 }
 
+/** One encoded video sample (frame) from `fox-strip-wasm::scan_samples`. */
+export interface SampleInfo {
+  /** Presentation timestamp (s) — stamp this on the EncodedVideoChunk. */
+  pts_s: number
+  /** Decode timestamp (s); samples are listed in this order. */
+  dts_s: number
+  byte_offset: number
+  byte_length: number
+  is_keyframe: boolean
+}
+
+/** Full video sample table — the demuxer output that feeds a `VideoDecoder`. */
+export interface SampleTable {
+  config: CodecConfig
+  samples: SampleInfo[]
+  duration_s: number
+}
+
 /** A decoded timeline thumbnail. */
 export interface Thumbnail {
   bitmap: ImageBitmap

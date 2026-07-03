@@ -1,15 +1,15 @@
 /**
  * renderVideo.ts — produce encoded video chunks for the timeline.
  *
- * Decode strategy: drive one hidden `<video>` element per source and seek it to
- * each output frame's timestamp (native, cross-browser, no demuxer needed);
- * composite the topmost clip onto an OffscreenCanvas over black; feed each frame
- * to a WebCodecs `VideoEncoder`. Only the *encode* is WebCodecs — the decode is
- * the browser's native video pipeline.
+ * For each output frame, composite the topmost clip (by z-order) onto an
+ * OffscreenCanvas over black and feed it to a WebCodecs VideoEncoder. Frames for
+ * each source come from a FrameSource, which is the fast demux + VideoDecoder
+ * path when the browser can decode the source, or a <video>-seek fallback
+ * otherwise (see frameSource.ts). Only the *encode* is always WebCodecs.
  */
 
 import type { EdlEvent } from '../wasm/foxEdl'
-import { getObjectUrl } from '../lib/objectUrlCache'
+import { createFrameSource, type FrameSource } from './frameSource'
 import type { Source } from '../types'
 
 /** The video event covering time `t`, topmost by z (events must be z-ascending). */
@@ -21,66 +21,33 @@ function topmostAt(events: EdlEvent[], t: number): EdlEvent | null {
   return hit
 }
 
-function seekVideo(video: HTMLVideoElement, t: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const target = Math.max(0, t)
-    if (video.readyState >= 2 && Math.abs(video.currentTime - target) < 1e-3) {
-      resolve()
-      return
-    }
-    const done = () => {
-      video.removeEventListener('seeked', done)
-      video.removeEventListener('error', fail)
-      resolve()
-    }
-    const fail = () => {
-      video.removeEventListener('seeked', done)
-      video.removeEventListener('error', fail)
-      reject(new Error('video seek failed'))
-    }
-    video.addEventListener('seeked', done)
-    video.addEventListener('error', fail)
-    video.currentTime = target
-  })
+/** Draw an image into WxH preserving aspect ratio (letterbox/pillarbox). */
+function drawContain(
+  ctx: OffscreenCanvasRenderingContext2D,
+  img: CanvasImageSource,
+  iw: number,
+  ih: number,
+  W: number,
+  H: number,
+): void {
+  if (!iw || !ih) return
+  const scale = Math.min(W / iw, H / ih)
+  const dw = iw * scale
+  const dh = ih * scale
+  ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh)
 }
 
-/** Draw the video frame into WxH preserving aspect ratio (letterbox/pillarbox). */
-function drawContain(ctx: OffscreenCanvasRenderingContext2D, video: HTMLVideoElement, W: number, H: number): void {
-  const vw = video.videoWidth
-  const vh = video.videoHeight
-  if (!vw || !vh) return
-  const scale = Math.min(W / vw, H / vh)
-  const dw = vw * scale
-  const dh = vh * scale
-  ctx.drawImage(video, (W - dw) / 2, (H - dh) / 2, dw, dh)
-}
-
-async function loadSourceVideos(events: EdlEvent[], sources: Source[]): Promise<Map<string, HTMLVideoElement>> {
+async function loadFrameSources(events: EdlEvent[], sources: Source[]): Promise<Map<string, FrameSource>> {
   const byId = new Map(sources.map((s) => [s.id, s]))
   const ids = [...new Set(events.map((e) => e.source_id))]
-  const videos = new Map<string, HTMLVideoElement>()
+  const map = new Map<string, FrameSource>()
   await Promise.all(
-    ids.map(
-      (id) =>
-        new Promise<void>((resolve, reject) => {
-          const src = byId.get(id)
-          if (!src) {
-            resolve()
-            return
-          }
-          const video = document.createElement('video')
-          video.muted = true
-          video.preload = 'auto'
-          video.src = getObjectUrl(src.id, src.file)
-          video.addEventListener('loadedmetadata', () => {
-            videos.set(id, video)
-            resolve()
-          }, { once: true })
-          video.addEventListener('error', () => reject(new Error(`failed to load ${src.name}`)), { once: true })
-        }),
-    ),
+    ids.map(async (id) => {
+      const src = byId.get(id)
+      if (src) map.set(id, await createFrameSource(src))
+    }),
   )
-  return videos
+  return map
 }
 
 const drainQueue = async (encoder: VideoEncoder, target: number) => {
@@ -111,7 +78,7 @@ export async function renderVideo({
   onProgress,
   signal,
 }: RenderVideoArgs): Promise<void> {
-  const videos = await loadSourceVideos(events, sources)
+  const frameSources = await loadFrameSources(events, sources)
   const canvas = new OffscreenCanvas(width, height)
   const ctx = canvas.getContext('2d')!
   const frameDur = 1_000_000 / fps
@@ -127,10 +94,13 @@ export async function renderVideo({
       ctx.fillRect(0, 0, width, height)
       const ev = topmostAt(events, t)
       if (ev) {
-        const video = videos.get(ev.source_id)
-        if (video) {
-          await seekVideo(video, ev.source_in_s + (t - ev.timeline_in_s))
-          drawContain(ctx, video, width, height)
+        const fs = frameSources.get(ev.source_id)
+        if (fs) {
+          const img = await fs.getFrame(ev.source_in_s + (t - ev.timeline_in_s))
+          if (img) {
+            const [iw, ih] = fs.dims()
+            drawContain(ctx, img, iw, ih, width, height)
+          }
         }
       }
 
@@ -143,9 +113,6 @@ export async function renderVideo({
     }
     await encoder.flush()
   } finally {
-    for (const v of videos.values()) {
-      v.src = ''
-      v.load()
-    }
+    for (const fs of frameSources.values()) fs.close()
   }
 }

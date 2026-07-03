@@ -6,7 +6,7 @@
  * holds the full file in memory.
  */
 
-import type { MediaInfo, ScanResult } from '../types'
+import type { MediaInfo, SampleTable, ScanResult } from '../types'
 
 /** Maps each worker op to its argument and result types. */
 export interface FoxOps {
@@ -18,7 +18,9 @@ export interface FoxOps {
   peaks: { args: { numPeaks: number }; result: Float32Array }
   /** Scan keyframes + pick `count` evenly-spaced indices. */
   scan: { args: { count: number }; result: { scan: ScanResult; selected: number[] } }
-  /** Raw bytes of one encoded sample. */
+  /** Full video sample table for demux-based decode. */
+  sampleTable: { args: Record<string, never>; result: SampleTable }
+  /** Raw bytes of one encoded sample (any byte range). */
   keyframeBytes: { args: { offset: number; length: number }; result: Uint8Array }
 }
 
