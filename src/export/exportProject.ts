@@ -9,6 +9,7 @@ import { Muxer as WebmMuxer, ArrayBufferTarget as WebmTarget } from 'webm-muxer'
 import { pickCodecs, even, type ExportCodecPlan } from './codecs'
 import { renderVideo } from './renderVideo'
 import { renderAudio } from './renderAudio'
+import { useEditorStore } from '../store/editorStore'
 import type { EdlResult } from '../wasm/foxEdl'
 import type { Source } from '../types'
 
@@ -121,6 +122,9 @@ export async function exportProject({ edl, sources, onStage, onProgress, signal 
       numberOfChannels: CHANNELS,
       bitrate: plan.audio.bitrate,
     })
+    // Per-clip output levels live on the store's audio clips; join by clip id.
+    const gainByClip = new Map(useEditorStore.getState().audioClips.map((c) => [c.id, c.gainDb]))
+
     onStage?.('audio')
     await renderAudio({
       events: edl.audio_events,
@@ -129,6 +133,7 @@ export async function exportProject({ edl, sources, onStage, onProgress, signal 
       sampleRate: SAMPLE_RATE,
       channels: CHANNELS,
       encoder: audioEncoder,
+      gainByClip,
       signal,
     })
     if (failure) throw failure

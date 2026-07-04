@@ -2,6 +2,7 @@
 
 import type { Clip, Source, Thumbnail } from '../types'
 import { hsl } from './color'
+import { dbToLinear } from './loudness'
 
 /**
  * Draw a clip's decoration into its canvas. The backing resolution is capped at
@@ -74,12 +75,15 @@ function drawWaveform(ctx: CanvasRenderingContext2D, W: number, H: number, clip:
   const inP = clip.in
   const span = clip.dur || 1
   const mid = H / 2
+  // Reflect the clip's output gain in the wave's height, so lowering a clip's
+  // level visibly shrinks its waveform (and raising it grows, up to full-height).
+  const scale = dbToLinear(clip.gainDb)
   ctx.fillStyle = hsl(src.color, 0.85, 14)
   for (let x = 0; x < W; x++) {
     const t = inP + (x / W) * span
     const idx = Math.min(peaks.length - 1, Math.max(0, Math.floor((t / total) * peaks.length)))
     const a = peaks[idx] || 0
-    const h = Math.max(0.75, a * mid * 0.9)
+    const h = Math.max(0.75, Math.min(mid, a * scale * mid * 0.9))
     ctx.fillRect(x, mid - h, 1, h * 2)
   }
 }

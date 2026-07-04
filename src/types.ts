@@ -90,6 +90,13 @@ export interface Source {
   thumbs: Thumbnail[] | null
   /** Waveform peaks in [0,1] (null until decoded / for silent sources). */
   peaks: Float32Array | null
+  /**
+   * Integrated loudness (EBU R128, LUFS), measured once at import.
+   * `undefined` while measuring, `null` for silent/undecodable audio.
+   */
+  lufs: number | null | undefined
+  /** User output gain in dB applied to this source's audio on export (0 = unity). */
+  gainDb: number
 }
 
 /**
@@ -108,6 +115,12 @@ export interface Clip {
   dur: number
   /** Stacking order among overlapping clips on the same track (higher paints on top). */
   z: number
+  /**
+   * Per-clip output gain in dB applied to this clip's audio on export (0 = unity).
+   * Seeded from the source's gain when placed; each clip (and split part) is then
+   * independent. Only meaningful for audio clips.
+   */
+  gainDb: number
 }
 
 export type Tool = 'select' | 'cut'

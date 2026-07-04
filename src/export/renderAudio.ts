@@ -8,6 +8,7 @@
 
 import type { EdlEvent } from '../wasm/foxEdl'
 import type { Source } from '../types'
+import { dbToLinear } from '../lib/loudness'
 
 const ENCODE_CHUNK = 1024
 
@@ -18,6 +19,8 @@ export interface RenderAudioArgs {
   sampleRate: number
   channels: number
   encoder: AudioEncoder
+  /** Per-clip output gain (dB) keyed by clip id; missing → 0 dB (unity). */
+  gainByClip?: Map<string, number>
   signal?: AbortSignal
 }
 
@@ -29,6 +32,7 @@ export async function renderAudio({
   sampleRate,
   channels,
   encoder,
+  gainByClip,
   signal,
 }: RenderAudioArgs): Promise<void> {
   if (!events.length || totalDuration <= 0) {
@@ -52,13 +56,19 @@ export async function renderAudio({
     }
   }
 
-  // Schedule every audio clip at its timeline position.
+  // Schedule every audio clip at its timeline position, each through its own
+  // gain node carrying that clip's output-level adjustment (dB):
+  // buffer source → clip gain → mix. Gain is per-clip, so split parts of the
+  // same source can sit at different levels.
   for (const ev of events) {
     const buf = buffers.get(ev.source_id)
     if (!buf) continue
+    const gain = ctx.createGain()
+    gain.gain.value = dbToLinear(gainByClip?.get(ev.clip_id) ?? 0)
+    gain.connect(ctx.destination)
     const node = ctx.createBufferSource()
     node.buffer = buf
-    node.connect(ctx.destination)
+    node.connect(gain)
     node.start(ev.timeline_in_s, ev.source_in_s, ev.source_out_s - ev.source_in_s)
   }
 

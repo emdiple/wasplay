@@ -1,8 +1,8 @@
 import { useCallback } from 'react'
 import { fox } from '../wasm/foxClient'
-import { generateThumbnails } from '../wasm/thumbnails'
 import { useEditorStore } from '../store/editorStore'
 import { createColorGenerator } from '../lib/color'
+import { decorateSource, measureLoudness } from '../lib/decorate'
 import { uid } from '../lib/id'
 import type { MediaInfo, Source } from '../types'
 
@@ -40,32 +40,6 @@ function probeMedia(file: File, isVideo: boolean): Promise<{ duration: number; w
     }
     el.src = url
   })
-}
-
-/**
- * Decode the waveform peaks + keyframe thumbnails for a source, writing them
- * back to the store as each completes. Resolves only when both are ready, so the
- * importer can hold the app until decoding finishes.
- */
-async function loadDecoration(src: Source): Promise<void> {
-  const { updateSource } = useEditorStore.getState()
-  const jobs: Promise<void>[] = []
-  if (src.hasAudio) {
-    jobs.push(
-      fox
-        .peaks(src.file, 1200)
-        .then((peaks) => updateSource(src.id, { peaks }))
-        .catch(() => {}),
-    )
-  }
-  if (src.isVideo) {
-    jobs.push(
-      generateThumbnails(src.file, { count: 16, width: 160, height: 90 })
-        .then((thumbs) => updateSource(src.id, { thumbs }))
-        .catch(() => {}),
-    )
-  }
-  await Promise.all(jobs)
 }
 
 /**
@@ -113,12 +87,15 @@ export function useMediaImport(): (fileList: FileList | File[]) => Promise<void>
           height: meta.height || 0,
           thumbs: null,
           peaks: null,
+          lufs: hasAudio ? undefined : null,
+          gainDb: 0,
         }
         store.addSource(src)
+        measureLoudness(src)
 
         // Block until decoded — long files can take a while (streamed in worker).
         store.lockUI(`${prefix}Decoding ${file.name} — waveform${isVideo ? ' & thumbnails' : ''}…`)
-        await loadDecoration(src)
+        await decorateSource(src)
       }
     } finally {
       store.unlockUI()

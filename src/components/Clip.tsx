@@ -50,7 +50,7 @@ export function Clip({ clip, isVideo }: ClipProps) {
   useEffect(() => {
     const canvas = canvasRef.current
     if (canvas && source) drawClipDecoration(canvas, clip, source, isVideo)
-  }, [source, pxPerSec, clip.dur, clip.in, isVideo])
+  }, [source, pxPerSec, clip.dur, clip.in, clip.gainDb, isVideo])
 
   if (!source) return null
 
@@ -79,9 +79,38 @@ export function Clip({ clip, isVideo }: ClipProps) {
     let didSnapshot = false // capture one undo entry per drag, only once it actually moves
     el.setPointerCapture(e.pointerId)
 
+    // Touch has no right-click: a 500ms hold without moving opens the context
+    // menu instead of starting a drag.
+    const menuX = e.clientX
+    const menuY = e.clientY
+    let longPressTimer: ReturnType<typeof setTimeout> | null =
+      e.pointerType === 'touch'
+        ? setTimeout(() => {
+            longPressTimer = null
+            if (moved) return
+            el.releasePointerCapture(e.pointerId)
+            el.removeEventListener('pointermove', onMove)
+            el.removeEventListener('pointerup', onUp)
+            const s = useEditorStore.getState()
+            const allClips = [...s.videoClips, ...s.audioClips]
+            s.setSelection(groupSelect(s.selection, allClips, clipId, false))
+            s.setStage(clip.sourceId)
+            s.openContextMenu(clipId, menuX, menuY)
+          }, 500)
+        : null
+    const cancelLongPress = () => {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer)
+        longPressTimer = null
+      }
+    }
+
     const onMove = (ev: PointerEvent) => {
       const dx = ev.clientX - startX
-      if (Math.abs(dx) > 3) moved = true
+      if (Math.abs(dx) > 3) {
+        moved = true
+        cancelLongPress()
+      }
       if (tool !== 'select' || !moved) return
       if (!didSnapshot) {
         useEditorStore.getState().snapshot()
@@ -115,6 +144,7 @@ export function Clip({ clip, isVideo }: ClipProps) {
     }
 
     const onUp = () => {
+      cancelLongPress()
       el.releasePointerCapture(e.pointerId)
       el.removeEventListener('pointermove', onMove)
       el.removeEventListener('pointerup', onUp)
@@ -160,7 +190,15 @@ export function Clip({ clip, isVideo }: ClipProps) {
       onContextMenu={onContextMenu}
     >
       <canvas className="clip-canvas" ref={canvasRef} />
-      <div className="clip-label">{source.name}</div>
+      <div className="clip-label">
+        <span className="clip-name">{source.name}</span>
+        {!isVideo && clip.gainDb !== 0 && (
+          <span className="clip-gain">
+            {clip.gainDb > 0 ? '+' : ''}
+            {clip.gainDb.toFixed(1)} dB
+          </span>
+        )}
+      </div>
     </div>
   )
 }
