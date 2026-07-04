@@ -10,6 +10,9 @@ dist-ssr/
 # Generated wasm-pack output (rebuild with `npm run wasm`)
 src/wasm/pkg/
 
+# Private design/architecture notes (kept local, not published)
+docs/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
