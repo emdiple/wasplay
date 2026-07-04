@@ -49,7 +49,7 @@ for **hardware-accelerated export with no native dependencies**.
 
 ## Features
 
-- **100% client-side, zero dependencies** — no uploads, no backend, no transcoding server, **no native install and no FFmpeg to set up**; works offline once loaded.
+- **100% client-side, no native dependencies** — no uploads, no backend, no transcoding server, **no native install and no FFmpeg to set up**; works offline once loaded.
 - **Handles huge files** — a streaming Rust/WASM core keeps **memory flat whether the source is 10 MB or 10 GB**, so multi-gigabyte clips import without exhausting the tab.
 - **Multi-format import** — drag in multiple audio/video files at once; each source gets a colour shared by its linked video and audio clips.
 - **Non-linear timeline** — single-layer (one video track, one audio track) editing: drag-to-arrange with snapping, marquee multi-select, a playhead-anchored razor that cuts linked A/V together, and zoom-to-fit on a timeline that scales to long media.
@@ -86,6 +86,25 @@ part" step to remember.
 | `npm run wasm` | Force-rebuild every WASM crate |
 | `npm run typecheck` | `tsc --noEmit` only |
 | `cargo test --workspace` | Rust test suite for all crates |
+
+## Browser support
+
+Wazplay leans on modern web-platform APIs, so it runs best in **Chromium-based
+browsers (Chrome, Edge, Brave, …)**, where every feature — including export —
+is fully supported.
+
+| Capability | Used for | Support |
+| --- | --- | --- |
+| [WebCodecs](https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API) | Hardware decode/encode for the render pipeline | Full in Chromium; partial/limited elsewhere |
+| [OffscreenCanvas](https://developer.mozilla.org/en-US/docs/Web/API/OffscreenCanvas) | Compositing render frames | Chromium, Firefox, Safari 16.4+ |
+| [File System Access](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API) | "Save to…" location picker on export | Chromium only — **falls back to a normal download elsewhere** |
+| Web Workers + `FileReaderSync` | Streaming large-file reads | All modern browsers |
+
+Import, editing, and analysis work across modern browsers; **in-browser
+export currently requires WebCodecs encode support, so a Chromium browser is
+recommended** for the full workflow. Feature detection is used where possible
+(e.g. the save picker degrades to a plain download), but WebCodecs encode has
+no pure-JS fallback.
 
 ## Architecture
 
