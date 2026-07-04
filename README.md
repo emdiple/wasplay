@@ -37,7 +37,7 @@ fully offline-capable** once loaded.
 The heavy lifting is split into small, single-purpose Rust crates compiled to
 WASM, each streaming source files byte-range by byte-range so **multi-gigabyte
 media stays at flat memory** regardless of input size (see
-[Streaming architecture](#streaming-architecture)). Rendering runs on the
+[Architecture](#architecture)). Rendering runs on the
 [WebCodecs API](https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API)
 for **hardware-accelerated export with no native dependencies**.
 
@@ -108,16 +108,11 @@ no pure-JS fallback.
 
 ## Architecture
 
-### Why standalone WASM modules
-
-Editing video in the browser demands a few hard things done fast and without
-blocking the UI: parsing containers, measuring loudness, decoding waveforms,
-locating keyframes, and keeping frame-accurate timeline math correct. Each is
-implemented as its own small Rust crate compiled to WASM, so the frontend pulls
-in only the pieces it needs. Every crate exposes both **whole-buffer**
-functions (`&[u8]` in, for small files and tests) and **streaming** functions
-(a `(offset, len) => Uint8Array` callback + file length) so huge sources are
-never fully loaded into memory.
+The heavy media work is split into small, single-purpose Rust crates compiled
+to WASM, so the React frontend pulls in only what it needs. Each crate offers
+both whole-buffer entry points (for small files and tests) and **streaming**
+ones (a `(offset, len) => Uint8Array` callback), so huge sources are never
+fully loaded into memory.
 
 | Crate | Responsibility |
 | --- | --- |
@@ -126,120 +121,24 @@ never fully loaded into memory.
 | [`waz-strip-wasm`](crates/waz-strip-wasm) | MP4 keyframe scanner (no video decode) |
 | [`waz-edl-wasm`](crates/waz-edl-wasm) | Stateless EDL / timeline export engine |
 
-<details>
-<summary><strong>Module APIs</strong></summary>
+**Streaming core.** Rather than load a file into an `ArrayBuffer` (which can
+exhaust memory on multi-gigabyte video), a Web Worker owns the `File` and reads
+byte ranges on demand via `FileReaderSync`; on the Rust side a `JsReader`
+implements `Read + Seek` so `symphonia` decodes packet-by-packet, and the MP4
+keyframe scan reads only the `moov` box, never the payload. **Net effect: peak
+memory stays flat whether the input is 10 MB or 10 GB.**
 
-#### waz-stinger-wasm
-
-```rust
-get_media_info(bytes) -> JSON string                  // container, codecs, channels, sample rate, bit depth
-measure_lufs_from_bytes(bytes) -> f64                 // integrated LUFS from raw file bytes
-measure_lufs(samples, sample_rate, channels) -> f64   // LUFS from pre-decoded interleaved f32 PCM
-gain_to_target(measured_lufs, target_lufs) -> f64     // dB/LU needed to hit a loudness target
-
-// streaming variants
-get_media_info_streaming(read_fn, file_len) -> JSON string
-measure_lufs_streaming(read_fn, file_len) -> f64
-```
-
-#### waz-wave-wasm
-
-```rust
-extract_peaks(audio_bytes, num_peaks) -> Vec<f32>     // peak amplitude per bucket, [0.0, 1.0]
-extract_peaks_streaming(read_fn, file_len, num_peaks) -> Vec<f32>
-```
-
-#### waz-strip-wasm
-
-```rust
-scan_keyframes(mp4_bytes) -> JSON string              // codec config + keyframe { timestamp, byte_offset, byte_length }[]
-get_keyframe_bytes(mp4_bytes, byte_offset, byte_length) -> Vec<u8>
-select_thumbnail_keyframes(scan_result_json, count) -> JSON indices  // evenly spaced across duration
-
-// streaming variants (reads only the `moov` box — the video payload is never touched)
-scan_keyframes_streaming(read_fn, file_len) -> JSON string
-get_keyframe_bytes_streaming(read_fn, byte_offset, byte_length) -> Vec<u8>
-```
-
-#### waz-edl-wasm
-
-A **stateless** EDL exporter. The editor store (`src/store/editorStore.ts`) is
-the single source of truth and does all interactive editing; this crate is a
-pure transform that takes a project snapshot as JSON and produces a
-frame-accurate EDL (events + a best-effort FFmpeg `filter_complex` and command)
-for external use.
-
-```rust
-export_edl(project_json) -> JSON   // { sources, video_events, audio_events, total_*, ffmpeg }
-validate(project_json) -> JSON     // { valid, errors[], warnings[] }
-
-// frame-time helpers
-snap_to_frame(time_s, fps_num, fps_den) -> f64
-seconds_to_frames(time_s, fps_num, fps_den) -> i64
-frames_to_seconds(frames, fps_num, fps_den) -> f64
-```
-
-The input `project_json` mirrors the store's shape: `{ fps, sources[],
-video_clips[], audio_clips[] }`, where each clip is `{ id, source_id, link,
-start_s, in_s, dur_s, z }`. The `ffmpeg` section composites video over a black
-base with `overlay` (gaps → black, overlaps resolve by `z`) and places audio
-with `adelay`/`amix`. The in-browser WebCodecs renderer consumes the same event
-list.
-
-</details>
-
-### Streaming architecture
-
-Reading a whole file into a JS `ArrayBuffer` and handing it to WASM works for
-small clips but breaks down for real video: `file.arrayBuffer()` can reject or
-exhaust memory on multi-gigabyte files, and copying the buffer across the
-JS↔WASM boundary multiplies memory use. Instead:
-
-- [`src/wasm/wazWorker.ts`](src/wasm/wazWorker.ts) is a module Web Worker that
-  owns a `File` handle and reads arbitrary byte ranges from it synchronously
-  with [`FileReaderSync`](https://developer.mozilla.org/en-US/docs/Web/API/FileReaderSync)
-  (only available inside workers).
-- Each crate's streaming export takes a `(offset, len) => Uint8Array` callback.
-  On the Rust side, `JsReader` implements `Read + Seek` (a `symphonia`
-  `MediaSource`) on top of that callback, so audio decodes packet-by-packet
-  without ever holding the full file in memory.
-- `waz-strip-wasm`'s streaming scan walks the top-level MP4 boxes and reads
-  **only the `moov` box** — the (potentially huge) `mdat` payload is never
-  touched.
-- [`src/wasm/wazClient.ts`](src/wasm/wazClient.ts) is the main-thread RPC
-  client: it posts the `File` (a cheap by-reference structured clone) to the
-  worker and gets typed results back as promises.
-
-**Net effect:** peak memory stays roughly flat whether the input is 10 MB or
-10 GB.
-
-### Project structure
+**Project layout.**
 
 ```
-crates/                 Rust workspace — one crate per WASM module
-  waz-stinger-wasm/        media probe + loudness (EBU R128 / LUFS)
-  waz-wave-wasm/           waveform peak extraction
-  waz-strip-wasm/          MP4 keyframe scanner (no video decode)
-  waz-edl-wasm/            EDL / timeline export engine
-
-src/                    React + TypeScript app
-  wasm/                   the WASM boundary: worker, typed client, thumbnails
-    pkg/                    wasm-pack output (generated, gitignored)
-  export/                 WebCodecs render + mux pipeline (MP4 / WebM)
-  lib/                    pure helpers (timeline math, colour, formatting)
-  store/                  Zustand editor store + persistence
-  hooks/                  import, zoom, transport, marquee, shortcuts
-  context/                shares viewport ref + zoom/transport controllers
-  components/             TopBar, MediaBin, Preview, Timeline, Inspector, …
-  styles/                 global stylesheet
-
-public/sample-files/    small test clips used during development
-scripts/build-wasm.mjs  Rust → WASM build step, run before dev/build
+crates/       Rust workspace — one WASM crate per media concern
+src/
+  wasm/       WASM boundary: worker + typed client, thumbnails
+  export/     WebCodecs render + mux pipeline (MP4 / WebM)
+  store/      Zustand editor store + persistence
+  components/ hooks/ lib/ context/ styles/   — React UI
+scripts/build-wasm.mjs   Rust → WASM build step (output in src/wasm/pkg/, gitignored)
 ```
-
-WASM output is generated into `src/wasm/pkg/` by
-[`scripts/build-wasm.mjs`](scripts/build-wasm.mjs) (gitignored — rebuilt on
-demand).
 
 ## Roadmap
 
