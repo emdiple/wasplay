@@ -33,6 +33,7 @@ its current handling strategy and architecture.
 - [Caching and memory use](#caching-and-memory-use)
 - [CPU overhead](#cpu-overhead)
 - [Multi-threading (WASM worker pool)](#multi-threading-wasm-worker-pool)
+- [Session persistence (save & restore across refreshes)](#session-persistence-save--restore-across-refreshes)
 
 ---
 
@@ -299,4 +300,79 @@ a single file's decode (peaks + thumbnails) benefit today. Making the
 per-file loop itself concurrent (e.g. `Promise.all` across files, bounded by
 pool size) is a natural next step if multi-file import speed becomes a
 priority.
+
+---
+
+### Session persistence (save & restore across refreshes)
+
+**What it does:** The whole editing session survives a page reload — imported
+media, both timeline tracks, per-clip audio levels, zoom/playhead, and theme.
+Saving is automatic (debounced); restore runs once at startup. The user picks
+files once and can refresh (or reopen the tab) without re-importing.
+
+**Where it lives:**
+- `src/lib/idb.ts` — a tiny IndexedDB wrapper for one object store of media
+  blobs, keyed by source id (`idbPutFile`/`idbGetFile`/`idbDeleteFile`/
+  `idbKeys`/`idbClear`). This is where the actual `File` bytes live.
+- `src/store/persist.ts` — the orchestrator: serializes the persistable slice
+  of the store to JSON, reconciles media blobs into IndexedDB, restores a saved
+  session on startup, and arms the debounced autosave subscription.
+- `src/lib/decorate.ts` — `decorateSource` (waveform peaks + keyframe
+  thumbnails) and `measureLoudness` (integrated LUFS), extracted so both the
+  importer (`useMediaImport.ts`) and the restore path re-derive decorations the
+  same way. These are **never persisted** — they're recomputed from the
+  restored bytes.
+- `src/store/editorStore.ts` — a `hydrate()` action that replaces the document
+  + view state from a restored session and resets transient/history state
+  (selection, undo/redo, menus).
+- `src/main.tsx` — calls `initPersistence()` once at module load, before render.
+- `src/lib/theme.ts` — theme persistence (localStorage) predates this system
+  and is independent; the project save doesn't touch it.
+
+**How it's handled:** Two stores, split by data shape:
+- **localStorage** holds the small JSON "project" — source *metadata* (id, name,
+  colour, dimensions, codec info, measured loudness, gain), both clip tracks
+  (clips are plain JSON already), and view state (`pxPerSec`, `playheadTime`,
+  `selectedSrcId`). Synchronous, tiny, fast.
+- **IndexedDB** holds the media file bytes — the one thing the browser will not
+  let us reopen from disk after a refresh (a user-picked `File` can't be
+  reconstructed from a path). `structuredClone` preserves the `File`'s name and
+  type, so a stored value rehydrates as a usable `File`.
+
+Autosave is a single `useEditorStore.subscribe` that debounces ~800 ms after
+any change, then writes the JSON and **reconciles** blobs: it diffs the current
+source ids against `idbKeys()`, `put`s files it doesn't have yet, and `delete`s
+blobs no longer referenced — so large media bytes are written once on import,
+not rewritten on every edit. Restore runs *before* autosave is armed, so a
+fresh empty store can't clobber a saved project; it pairs each persisted source
+with its stored blob, drops any source whose blob is missing (and clips that
+referenced it), `hydrate()`s the store, then kicks off `decorateSource` for
+every source in the background (and `measureLoudness` only when loudness wasn't
+already persisted). Loudness *is* persisted (it's a slow full-decode
+measurement); peaks and thumbnails are not (cheaper to recompute than to
+serialize `Float32Array`/`ImageBitmap`).
+
+**Trade-offs:**
+- **Storage quota:** very large projects can exceed the browser's per-origin
+  quota. Blob writes are wrapped in try/catch, so on failure the project JSON
+  still saves but some media bytes may not — and there is **no visible warning
+  or usage indicator** yet. Private-browsing / disabled-storage modes degrade
+  silently to "no persistence."
+- **No manual reset in the UI:** `clearPersisted()` (wipes the JSON + all
+  blobs) exists but isn't wired to any button; there's no "clear saved session"
+  control yet.
+- **Single implicit project:** one autosaved session per origin — no named
+  projects, no explicit save slots, no export/import of a project file.
+- **Debounce window:** a reload within ~800 ms of the last edit (or a crash
+  before the timer fires) can lose that last change. Acceptable for an
+  autosave; a `beforeunload` flush would tighten it.
+- **Restore re-decodes:** peaks/thumbnails are recomputed on every restore, so
+  reopening a large bin spends CPU re-decorating (in the worker pool, in the
+  background) rather than loading cached artifacts.
+
+**Future direction:** surface a storage-usage indicator and a "clear saved
+session" control; consider persisting peaks (and thumbnails as blobs) to skip
+re-decoding large bins on restore; add named projects / explicit save slots and
+a project-file export-import if multi-project workflows are wanted; flush on
+`beforeunload` to close the debounce gap.
 
