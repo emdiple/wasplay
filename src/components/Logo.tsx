@@ -2,7 +2,7 @@
 export function Logo() {
   return (
     <div className="logo">
-      Shadow<b>fox</b> · Studio
+      Waz<b>play</b>
     </div>
   )
 }

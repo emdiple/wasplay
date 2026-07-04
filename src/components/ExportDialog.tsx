@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useEditorStore } from '../store/editorStore'
 import { serializeProject } from '../export/project'
-import { exportEdl, type EdlResult } from '../wasm/foxEdl'
+import { exportEdl, type EdlResult } from '../wasm/wazEdl'
 import { exportProject, type ExportStage } from '../export/exportProject'
 import { pickCodecs, even, type ExportCodecPlan } from '../export/codecs'
 import {
@@ -12,7 +12,7 @@ import {
   type FsFileHandle,
 } from '../lib/download'
 
-const DEFAULT_NAME = 'shadowfox-export'
+const DEFAULT_NAME = 'wazplay-export'
 /** Strip a trailing known media extension so we can re-append the real one. */
 const baseName = (name: string): string => name.trim().replace(/\.(mp4|webm|m4v|mov)$/i, '') || DEFAULT_NAME
 
@@ -72,7 +72,7 @@ export function ExportDialog() {
 
   const downloadEdl = () => {
     if (!edl) return
-    downloadBlob(JSON.stringify(edl, null, 2), 'shadowfox-timeline.edl.json', 'application/json')
+    downloadBlob(JSON.stringify(edl, null, 2), 'wazplay-timeline.edl.json', 'application/json')
   }
 
   const render = async () => {

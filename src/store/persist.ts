@@ -19,7 +19,7 @@ import { useEditorStore } from './editorStore'
 import { idbPutFile, idbGetFile, idbDeleteFile, idbKeys, idbClear } from '../lib/idb'
 import type { Clip, HSL, MediaInfo, Source } from '../types'
 
-const KEY = 'shadowfox-project'
+const KEY = 'wazplay-project'
 const VERSION = 1
 const DEBOUNCE_MS = 800
 

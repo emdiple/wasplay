@@ -1,6 +1,6 @@
 /**
  * project.ts — serialize the editor store into the flat "project" snapshot the
- * fox-edl-wasm exporter and the render pipeline consume. The store stays the
+ * waz-edl-wasm exporter and the render pipeline consume. The store stays the
  * single source of truth; this is just a field-name mapping to the WASM shape.
  */
 

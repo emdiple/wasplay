@@ -1,5 +1,5 @@
 /**
- * Shared domain types for Shadowfox Studio.
+ * Shared domain types for Wazplay.
  *
  * The WASM-facing shapes (`MediaInfo`, `ScanResult`, …) mirror the JSON returned
  * by the Rust crates; see each crate's `src/lib.rs` (under `crates/`) for the
@@ -8,7 +8,7 @@
 
 // ── WASM results ──────────────────────────────────────────────────────────────
 
-/** Container / codec probe from `fox-ear-wasm::get_media_info`. */
+/** Container / codec probe from `waz-stinger-wasm::get_media_info`. */
 export interface MediaInfo {
   container: string
   audio_codec: string
@@ -18,7 +18,7 @@ export interface MediaInfo {
   bits_per_sample: number | null
 }
 
-/** One keyframe located by `fox-strip-wasm::scan_keyframes`. */
+/** One keyframe located by `waz-strip-wasm::scan_keyframes`. */
 export interface KeyframeInfo {
   timestamp_s: number
   byte_offset: number
@@ -41,7 +41,7 @@ export interface ScanResult {
   duration_s: number
 }
 
-/** One encoded video sample (frame) from `fox-strip-wasm::scan_samples`. */
+/** One encoded video sample (frame) from `waz-strip-wasm::scan_samples`. */
 export interface SampleInfo {
   /** Presentation timestamp (s) — stamp this on the EncodedVideoChunk. */
   pts_s: number

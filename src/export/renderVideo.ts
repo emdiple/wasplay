@@ -8,7 +8,7 @@
  * otherwise (see frameSource.ts). Only the *encode* is always WebCodecs.
  */
 
-import type { EdlEvent } from '../wasm/foxEdl'
+import type { EdlEvent } from '../wasm/wazEdl'
 import { createFrameSource, type FrameSource } from './frameSource'
 import type { Source } from '../types'
 

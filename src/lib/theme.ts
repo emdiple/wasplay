@@ -2,7 +2,7 @@
 
 export type Theme = 'dark' | 'light'
 
-const STORAGE_KEY = 'shadowfox-theme'
+const STORAGE_KEY = 'wazplay-theme'
 
 /** The user's saved manual choice, or null if they've never toggled. */
 export function readStoredTheme(): Theme | null {

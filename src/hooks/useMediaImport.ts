@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { fox } from '../wasm/foxClient'
+import { waz } from '../wasm/wazClient'
 import { useEditorStore } from '../store/editorStore'
 import { createColorGenerator } from '../lib/color'
 import { decorateSource, measureLoudness } from '../lib/decorate'
@@ -70,7 +70,7 @@ export function useMediaImport(): (fileList: FileList | File[]) => Promise<void>
         // an audio track actually exists — a silent video gets no audio clip.
         const [meta, info] = await Promise.all([
           probeMedia(file, isVideo).catch(() => ({ duration: 0, width: 0, height: 0 })),
-          fox.mediaInfo(file).catch(() => null),
+          waz.mediaInfo(file).catch(() => null),
         ])
         const hasAudio = info ? hasAudioTrack(info) : true
 

@@ -91,7 +91,7 @@ function DefaultCard() {
       <div className="stage-swatch" style={{ background: '#1a1c24' }}>
         ◎
       </div>
-      <div className="stage-name">Shadowfox Studio</div>
+      <div className="stage-name">Wazplay</div>
       <div className="stage-hint">
         Import multiple audio/video files. Each file gets its own colour — its video and audio share that colour on the
         single-layer timeline below.

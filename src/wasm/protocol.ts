@@ -9,7 +9,7 @@
 import type { MediaInfo, SampleTable, ScanResult } from '../types'
 
 /** Maps each worker op to its argument and result types. */
-export interface FoxOps {
+export interface WazOps {
   /** Probe container / codec info. */
   mediaInfo: { args: Record<string, never>; result: MediaInfo }
   /** Integrated loudness in LUFS. */
@@ -24,15 +24,15 @@ export interface FoxOps {
   keyframeBytes: { args: { offset: number; length: number }; result: Uint8Array }
 }
 
-export type FoxOp = keyof FoxOps
+export type WazOp = keyof WazOps
 
-export interface FoxRequest<Op extends FoxOp = FoxOp> {
+export interface WazRequest<Op extends WazOp = WazOp> {
   id: number
   op: Op
   file: File
-  args: FoxOps[Op]['args']
+  args: WazOps[Op]['args']
 }
 
-export type FoxResponse<Op extends FoxOp = FoxOp> =
-  | { id: number; ok: true; result: FoxOps[Op]['result'] }
+export type WazResponse<Op extends WazOp = WazOp> =
+  | { id: number; ok: true; result: WazOps[Op]['result'] }
   | { id: number; ok: false; error: string }

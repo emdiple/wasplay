@@ -10,7 +10,7 @@ import { pickCodecs, even, type ExportCodecPlan } from './codecs'
 import { renderVideo } from './renderVideo'
 import { renderAudio } from './renderAudio'
 import { useEditorStore } from '../store/editorStore'
-import type { EdlResult } from '../wasm/foxEdl'
+import type { EdlResult } from '../wasm/wazEdl'
 import type { Source } from '../types'
 
 const SAMPLE_RATE = 48000

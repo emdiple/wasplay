@@ -13,7 +13,7 @@
  *   that can play the file, and still avoids reading the whole file into a buffer.
  */
 
-import { fox } from './foxClient'
+import { waz } from './wazClient'
 import type { CodecConfig, KeyframeInfo, ScanResult, Thumbnail } from '../types'
 
 export interface ThumbnailOptions {
@@ -31,7 +31,7 @@ export async function generateThumbnails(
   { count = 10, width = 160, height = 90 }: ThumbnailOptions = {},
 ): Promise<Thumbnail[]> {
   // 1. Scan container in the worker (reads only the moov box) + pick indices.
-  const { scan, selected } = await fox.scan(file, count)
+  const { scan, selected } = await waz.scan(file, count)
 
   if (!scan.keyframes.length) {
     throw new Error('No keyframes found — is this a valid MP4 with video?')
@@ -82,7 +82,7 @@ async function decodeViaWebCodecs(
   const results: Thumbnail[] = []
   for (const kf of keyframes) {
     // Fetch just this keyframe's bytes from the worker (small range read).
-    const data = await fox.keyframeBytes(file, kf.byte_offset, kf.byte_length)
+    const data = await waz.keyframeBytes(file, kf.byte_offset, kf.byte_length)
     const bitmap = await decodeOneFrame(data, kf, decoderConfig, thumbW, thumbH)
     results.push({ bitmap, timestamp_s: kf.timestamp_s })
   }

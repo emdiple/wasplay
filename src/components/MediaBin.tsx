@@ -85,7 +85,7 @@ function BinItem({ src, onAppend }: { src: Source; onAppend?: () => void }) {
         zoom.fitTimeline()
       }}
       onDragStart={(e) => {
-        e.dataTransfer.setData('text/fox-source', src.id)
+        e.dataTransfer.setData('text/waz-source', src.id)
         e.dataTransfer.effectAllowed = 'copy'
       }}
     >

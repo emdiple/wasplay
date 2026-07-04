@@ -3,7 +3,7 @@
  *
  * Two implementations behind one interface:
  *
- *  - DecoderFrameSource (fast): demux the MP4 via fox-strip's sample table and
+ *  - DecoderFrameSource (fast): demux the MP4 via waz-strip's sample table and
  *    decode sequentially with a WebCodecs VideoDecoder — no per-frame <video>
  *    seeking. Reads each GOP's bytes in one streamed range read, decodes forward,
  *    and hands back the frame whose PTS covers the requested time. Resets to the
@@ -19,7 +19,7 @@
  * exports correctly.
  */
 
-import { fox } from '../wasm/foxClient'
+import { waz } from '../wasm/wazClient'
 import { getObjectUrl } from '../lib/objectUrlCache'
 import type { SampleInfo, Source } from '../types'
 
@@ -88,7 +88,7 @@ class DecoderFrameSource implements FrameSource {
     const last = this.samples[end - 1]
     const spanStart = first.byte_offset
     const spanLen = last.byte_offset + last.byte_length - spanStart
-    const bytes = await fox.keyframeBytes(this.file, spanStart, spanLen)
+    const bytes = await waz.keyframeBytes(this.file, spanStart, spanLen)
     for (let i = startIdx; i < end; i++) {
       const s = this.samples[i]
       const off = s.byte_offset - spanStart
@@ -189,7 +189,7 @@ class DecoderFrameSource implements FrameSource {
     if (!('VideoDecoder' in globalThis)) return null
     if (!(source.file.type === 'video/mp4' || MP4_RX.test(source.name))) return null
     try {
-      const table = await fox.sampleTable(source.file)
+      const table = await waz.sampleTable(source.file)
       if (!table.samples.length) return null
       const config: VideoDecoderConfig = {
         codec: table.config.codec,

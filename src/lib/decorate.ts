@@ -6,7 +6,7 @@
  * path share this. Each result is written back to the store as it lands.
  */
 
-import { fox } from '../wasm/foxClient'
+import { waz } from '../wasm/wazClient'
 import { generateThumbnails } from '../wasm/thumbnails'
 import { useEditorStore } from '../store/editorStore'
 import type { Source } from '../types'
@@ -21,7 +21,7 @@ export async function decorateSource(src: Source): Promise<void> {
   const jobs: Promise<void>[] = []
   if (src.hasAudio) {
     jobs.push(
-      fox
+      waz
         .peaks(src.file, 1200)
         .then((peaks) => updateSource(src.id, { peaks }))
         .catch(() => {}),
@@ -45,7 +45,7 @@ export async function decorateSource(src: Source): Promise<void> {
 export function measureLoudness(src: Source): void {
   if (!src.hasAudio) return
   const { updateSource } = useEditorStore.getState()
-  fox
+  waz
     .lufs(src.file)
     .then((lufs) => updateSource(src.id, { lufs: Number.isFinite(lufs) ? lufs : null }))
     .catch(() => updateSource(src.id, { lufs: null }))

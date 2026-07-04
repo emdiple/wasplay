@@ -1,4 +1,4 @@
-//! fox-edl-wasm — a small, **stateless** EDL (Edit Decision List) exporter.
+//! waz-edl-wasm — a small, **stateless** EDL (Edit Decision List) exporter.
 //!
 //! This crate does not hold or edit timeline state. The editor's Zustand store is
 //! the single source of truth and performs all interactive edits (cut, arrange,

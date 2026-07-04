@@ -1,4 +1,4 @@
-# Shadowfox Studio — Design & Architecture
+# Wazplay — Design & Architecture
 
 ## Purpose
 
@@ -45,16 +45,16 @@ files are read as arbitrary byte ranges on demand, so a 10 MB clip and a 10 GB
 clip use roughly the same peak memory.
 
 **Where it lives:**
-- `src/wasm/foxWorker.ts` — a module Web Worker that owns the `File` and reads
+- `src/wasm/wazWorker.ts` — a module Web Worker that owns the `File` and reads
   byte ranges synchronously via `FileReaderSync` (only available inside
   workers). Multiple instances of this module now run concurrently as a pool
   — see [Multi-threading](#multi-threading-wasm-worker-pool).
-- `src/wasm/foxClient.ts` — main-thread RPC client; posts the `File` to a pool
+- `src/wasm/wazClient.ts` — main-thread RPC client; posts the `File` to a pool
   worker by reference (a cheap structured clone, not a copy).
-- `crates/fox-ear-wasm/src/reader.rs`, `crates/fox-soundwave-wasm/src/reader.rs`
+- `crates/waz-stinger-wasm/src/reader.rs`, `crates/waz-wave-wasm/src/reader.rs`
   — `JsReader`, a `Read + Seek` adapter over the worker's byte-range callback,
   so `symphonia` decodes audio packet-by-packet.
-- `crates/fox-strip-wasm` — a from-scratch ISOBMFF (MP4) box parser whose
+- `crates/waz-strip-wasm` — a from-scratch ISOBMFF (MP4) box parser whose
   streaming scan reads **only the `moov` box**; the (potentially huge) `mdat`
   video payload is never read for keyframe scanning.
 
@@ -86,10 +86,10 @@ upload, no server transcoding):
    in-browser via WebCodecs and triggers a download.
 
 **Where it lives:**
-- `crates/fox-edl-wasm` — stateless EDL exporter (project JSON in, EDL JSON
+- `crates/waz-edl-wasm` — stateless EDL exporter (project JSON in, EDL JSON
   out); no timeline state is duplicated here, the Zustand store stays the
   single source of truth.
-- `src/wasm/foxEdl.ts` — main-thread client for the EDL exporter (runs on the
+- `src/wasm/wazEdl.ts` — main-thread client for the EDL exporter (runs on the
   main thread, not the worker, since it's a cheap pure JSON transform with no
   file reads).
 - `src/export/project.ts` — maps the store's live state to the flat project
@@ -185,7 +185,7 @@ canvases only when something visually relevant actually changed — but the
 is the app's single biggest CPU/UI-blocking cost today.
 
 **Where it lives:**
-- `src/wasm/foxWorker.ts` — all WASM decode/analysis (loudness, waveform
+- `src/wasm/wazWorker.ts` — all WASM decode/analysis (loudness, waveform
   peaks, MP4 keyframe scanning) runs in a pool of Web Workers, off the main
   thread and now genuinely parallel across OS threads (see *Reading files*
   and [Multi-threading](#multi-threading-wasm-worker-pool)).
@@ -243,8 +243,8 @@ single shared worker, giving genuine OS-thread parallelism: independent jobs
 sources' jobs) can execute on separate CPU cores at the same time, rather than
 queuing one after another on one thread.
 
-**Where it lives:** `src/wasm/foxClient.ts` only — this is fully encapsulated
-behind the existing `fox.*` API, so `foxWorker.ts`, `protocol.ts`,
+**Where it lives:** `src/wasm/wazClient.ts` only — this is fully encapsulated
+behind the existing `waz.*` API, so `wazWorker.ts`, `protocol.ts`,
 `thumbnails.ts`, and every call site (`useMediaImport.ts`,
 `AnalyzerPanel.tsx`) are unchanged.
 
@@ -259,7 +259,7 @@ behind the existing `fox.*` API, so `foxWorker.ts`, `protocol.ts`,
 - **Dispatch:** least-busy. Each worker tracks an in-flight request count;
   a new call goes to whichever worker currently has the fewest, since job
   duration varies a lot (LUFS on a long file vs. a small keyframe fetch).
-- **Statelessness is what makes this safe:** `foxWorker.ts` carries no state
+- **Statelessness is what makes this safe:** `wazWorker.ts` carries no state
   between calls (each op is fully self-contained given a `File` + args), so
   any worker can serve any request — no per-worker affinity or routing logic
   needed beyond least-busy.

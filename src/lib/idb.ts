@@ -7,7 +7,7 @@
  * stored value is the original `File` (structured-clone preserves name + type).
  */
 
-const DB_NAME = 'shadowfox'
+const DB_NAME = 'wazplay'
 const DB_VERSION = 1
 const STORE = 'media'
 

@@ -1,6 +1,20 @@
-# Shadowfox Studio
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="public/branding/dark-logo-github.png">
+  <source media="(prefers-color-scheme: light)" srcset="public/branding/light-logo-github.png">
+  <img alt="Wazplay logo" src="public/branding/light-logo-github.png">
+</picture>
 
-Shadowfox is a browser-based **video editor** built on a set of Rust/WebAssembly
+# Wazplay
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node.js >= 20](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](package.json)
+[![Rust](https://img.shields.io/badge/rust-2024-CE422B?logo=rust&logoColor=white)](Cargo.toml)
+[![WebAssembly](https://img.shields.io/badge/wasm-wasm--pack-654FF0?logo=webassembly&logoColor=white)](https://rustwasm.github.io/wasm-pack/)
+[![TypeScript](https://img.shields.io/badge/typescript-5.7-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
+[![React](https://img.shields.io/badge/react-19-61DAFB?logo=react&logoColor=black)](package.json)
+[![Vite](https://img.shields.io/badge/vite-6-646CFF?logo=vite&logoColor=white)](vite.config.ts)
+
+Wazplay is a browser-based **video editor** built on a set of Rust/WebAssembly
 media modules — no server-side transcoding, no uploads. Each crate is a
 focused, standalone WASM module (media probing, loudness, waveforms, keyframe
 scanning, EDL/timeline math) that the React editor UI is built on top of.
@@ -46,10 +60,10 @@ frontend can pull in just the pieces it needs.
 
 ```
 crates/               Rust workspace — one crate per WASM module
-  fox-ear-wasm/          media probe + loudness (EBU R128 / LUFS)
-  fox-soundwave-wasm/    waveform peak extraction
-  fox-strip-wasm/        MP4 keyframe scanner (no video decode)
-  fox-edl-wasm/          EDL / timeline engine (not yet wired into the UI)
+  waz-stinger-wasm/          media probe + loudness (EBU R128 / LUFS)
+  waz-wave-wasm/    waveform peak extraction
+  waz-strip-wasm/        MP4 keyframe scanner (no video decode)
+  waz-edl-wasm/          EDL / timeline engine (not yet wired into the UI)
 
 src/                   React + TypeScript app
   wasm/                  the WASM boundary: worker, typed client, thumbnails
@@ -71,7 +85,7 @@ JS callback + file length) so multi-gigabyte source files never have to be
 fully loaded into memory. See [Streaming architecture](#streaming-architecture-workerfs)
 below.
 
-### fox-ear-wasm
+### waz-stinger-wasm
 
 ```rust
 get_media_info(bytes) -> JSON string             // container, codecs, channels, sample rate, bit depth
@@ -84,14 +98,14 @@ get_media_info_streaming(read_fn, file_len) -> JSON string
 measure_lufs_streaming(read_fn, file_len) -> f64
 ```
 
-### fox-soundwave-wasm
+### waz-wave-wasm
 
 ```rust
 extract_peaks(audio_bytes, num_peaks) -> Vec<f32>            // peak amplitude per bucket, [0.0, 1.0]
 extract_peaks_streaming(read_fn, file_len, num_peaks) -> Vec<f32>
 ```
 
-### fox-strip-wasm
+### waz-strip-wasm
 
 ```rust
 scan_keyframes(mp4_bytes) -> JSON string             // codec config + keyframe { timestamp, byte_offset, byte_length }[]
@@ -103,7 +117,7 @@ scan_keyframes_streaming(read_fn, file_len) -> JSON string
 get_keyframe_bytes_streaming(read_fn, byte_offset, byte_length) -> Vec<u8>
 ```
 
-### fox-edl-wasm
+### waz-edl-wasm
 
 A **stateless** EDL exporter. The editor store (`src/store/editorStore.ts`) is
 the single source of truth and does all interactive editing; this crate is a
@@ -140,20 +154,20 @@ JS↔WASM boundary multiplies memory use.
 
 Instead:
 
-- [`src/wasm/foxWorker.ts`](src/wasm/foxWorker.ts) is a module Web Worker
+- [`src/wasm/wazWorker.ts`](src/wasm/wazWorker.ts) is a module Web Worker
   that owns a `File` handle and reads arbitrary byte ranges from it
   synchronously with
   [`FileReaderSync`](https://developer.mozilla.org/en-US/docs/Web/API/FileReaderSync)
   (only available inside workers).
 - Each crate's streaming export takes a `(offset, len) => Uint8Array`
-  callback. On the Rust side, `JsReader` (`crates/fox-ear-wasm/src/reader.rs`,
-  `crates/fox-soundwave-wasm/src/reader.rs`) implements `Read + Seek` (a
+  callback. On the Rust side, `JsReader` (`crates/waz-stinger-wasm/src/reader.rs`,
+  `crates/waz-wave-wasm/src/reader.rs`) implements `Read + Seek` (a
   symphonia `MediaSource`) on top of that callback, so `symphonia` decodes
   audio packet-by-packet without ever holding the full file in memory.
-- `fox-strip-wasm`'s streaming scan walks the top-level MP4 boxes and reads
+- `waz-strip-wasm`'s streaming scan walks the top-level MP4 boxes and reads
   **only the `moov` box** — the (potentially huge) `mdat` payload is never
   read at all.
-- [`src/wasm/foxClient.ts`](src/wasm/foxClient.ts) is the main-thread RPC
+- [`src/wasm/wazClient.ts`](src/wasm/wazClient.ts) is the main-thread RPC
   client: it posts the `File` (a cheap by-reference structured clone) to the
   worker and gets back typed results as promises.
 
@@ -164,7 +178,7 @@ is 10 MB or 10 GB.
 
 WASM output is generated into `src/wasm/pkg/` by
 [`scripts/build-wasm.mjs`](scripts/build-wasm.mjs) (gitignored — rebuilt on
-demand). `fox-edl-wasm` is part of the Cargo workspace and test suite but has
+demand). `waz-edl-wasm` is part of the Cargo workspace and test suite but has
 no JS bindings built yet, since it isn't wired into the UI.
 
 ## Editor UI
@@ -185,3 +199,10 @@ timeline.
 Clips cannot yet be previewed or played back as composited video, and there
 is no export/render step — that's the next layer to build on top of the WASM
 modules above.
+
+## License
+
+Wazplay is licensed under the [MIT License](LICENSE) — free to use, modify,
+and distribute, with no restrictions. A commercial/hosted version of Wazplay
+may be offered in the future as a separate product; it will not change the
+terms of this open-source release.

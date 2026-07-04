@@ -1,5 +1,5 @@
 [package]
-name = "fox-edl-wasm"
+name = "waz-edl-wasm"
 version = "0.1.0"
 edition = "2024"
 

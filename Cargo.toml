@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "crates/fox-ear-wasm",
-    "crates/fox-soundwave-wasm",
-    "crates/fox-strip-wasm",
-    "crates/fox-edl-wasm",
+    "crates/waz-stinger-wasm",
+    "crates/waz-wave-wasm",
+    "crates/waz-strip-wasm",
+    "crates/waz-edl-wasm",
 ]
 resolver = "3"
 

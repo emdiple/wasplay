@@ -1,5 +1,5 @@
 /**
- * foxClient.ts — main-thread RPC client for the media worker pool.
+ * wazClient.ts — main-thread RPC client for the media worker pool.
  *
  * Spins up a small pool of module workers on first use (real OS-thread
  * parallelism — each worker is an independent WASM instance) and exposes a
@@ -7,13 +7,13 @@
  * clone) so a worker can stream bytes with `FileReaderSync` — the main thread
  * never reads the file itself.
  *
- * `foxWorker.ts` is fully stateless per call (no state carries between
+ * `wazWorker.ts` is fully stateless per call (no state carries between
  * requests), so any worker in the pool can serve any request — dispatch picks
  * whichever worker currently has the fewest requests in flight, since job
  * duration varies wildly (LUFS on a long file vs. a small keyframe fetch).
  */
 
-import type { FoxOp, FoxOps, FoxRequest, FoxResponse } from './protocol'
+import type { WazOp, WazOps, WazRequest, WazResponse } from './protocol'
 
 interface Pending {
   resolve: (value: unknown) => void
@@ -35,9 +35,9 @@ let seq = 0
 const pending = new Map<number, Pending>()
 
 function makeWorker(index: number): Worker {
-  const w = new Worker(new URL('./foxWorker.ts', import.meta.url), { type: 'module' })
+  const w = new Worker(new URL('./wazWorker.ts', import.meta.url), { type: 'module' })
 
-  w.onmessage = (e: MessageEvent<FoxResponse>) => {
+  w.onmessage = (e: MessageEvent<WazResponse>) => {
     const msg = e.data
     const p = pending.get(msg.id)
     if (!p) return
@@ -50,7 +50,7 @@ function makeWorker(index: number): Worker {
   // A fatal worker error (e.g. failed module import) rejects only this
   // worker's in-flight requests; the slot is recreated on next dispatch.
   w.onerror = (e) => {
-    const message = e.message || 'fox-worker crashed'
+    const message = e.message || 'waz-worker crashed'
     for (const [id, p] of pending) {
       if (p.workerIndex !== index) continue
       pending.delete(id)
@@ -73,19 +73,19 @@ function pickWorker(): number {
   return best
 }
 
-function call<Op extends FoxOp>(op: Op, file: File, args: FoxOps[Op]['args']): Promise<FoxOps[Op]['result']> {
+function call<Op extends WazOp>(op: Op, file: File, args: WazOps[Op]['args']): Promise<WazOps[Op]['result']> {
   const workerIndex = pickWorker()
   const w = workers[workerIndex]!
   const id = ++seq
   inFlight[workerIndex]++
-  return new Promise<FoxOps[Op]['result']>((resolve, reject) => {
+  return new Promise<WazOps[Op]['result']>((resolve, reject) => {
     pending.set(id, { resolve: resolve as (v: unknown) => void, reject, workerIndex })
-    const request: FoxRequest<Op> = { id, op, file, args }
+    const request: WazRequest<Op> = { id, op, file, args }
     w.postMessage(request)
   })
 }
 
-export const fox = {
+export const waz = {
   /** Probe container / codec info. */
   mediaInfo: (file: File) => call('mediaInfo', file, {}),
   /** Integrated loudness in LUFS. */

@@ -1,12 +1,12 @@
 /**
- * foxEdl.ts — main-thread client for the stateless fox-edl-wasm exporter.
+ * wazEdl.ts — main-thread client for the stateless waz-edl-wasm exporter.
  *
  * EDL export is a pure JSON→JSON transform with no file reads, so it runs on the
  * main thread (lazily initialising the wasm module once) rather than going
  * through the media worker.
  */
 
-import initEdl, { export_edl, validate } from './pkg/fox-edl-wasm/fox_edl_wasm.js'
+import initEdl, { export_edl, validate } from './pkg/waz-edl-wasm/waz_edl_wasm.js'
 import type { Project } from '../export/project'
 
 let ready: Promise<unknown> | null = null

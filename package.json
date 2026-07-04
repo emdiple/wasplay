@@ -1,9 +1,10 @@
 {
-  "name": "shadowfox-studio",
+  "name": "wazplay",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "description": "Browser-based video editor powered by Rust/WebAssembly media modules.",
+  "license": "MIT",
   "scripts": {
     "wasm": "node scripts/build-wasm.mjs",
     "wasm:ensure": "node scripts/build-wasm.mjs --if-missing",

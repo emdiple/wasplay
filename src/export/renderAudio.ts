@@ -6,7 +6,7 @@
  * that buffer to a WebCodecs `AudioEncoder` in chunks.
  */
 
-import type { EdlEvent } from '../wasm/foxEdl'
+import type { EdlEvent } from '../wasm/wazEdl'
 import type { Source } from '../types'
 import { dbToLinear } from '../lib/loudness'
 

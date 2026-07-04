@@ -16,7 +16,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const ifMissing = process.argv.includes('--if-missing')
 
 // Crates with a wasm-bindgen surface that are shipped to the frontend.
-const crates = ['fox-ear-wasm', 'fox-soundwave-wasm', 'fox-strip-wasm', 'fox-edl-wasm']
+const crates = ['waz-stinger-wasm', 'waz-wave-wasm', 'waz-strip-wasm', 'waz-edl-wasm']
 
 for (const crate of crates) {
   const outDir = resolve(root, 'src/wasm/pkg', crate)

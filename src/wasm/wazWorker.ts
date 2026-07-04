@@ -1,5 +1,5 @@
 /**
- * foxWorker.ts — WASM media worker (module worker).
+ * wazWorker.ts — WASM media worker (module worker).
  *
  * Runs every WASM module that needs to read an entire media file. Instead of
  * receiving a giant ArrayBuffer from the main thread, it receives the `File`
@@ -11,16 +11,16 @@
 
 /// <reference lib="webworker" />
 
-import initEar, { get_media_info_streaming, measure_lufs_streaming } from './pkg/fox-ear-wasm/fox_ear_wasm.js'
-import initWave, { extract_peaks_streaming } from './pkg/fox-soundwave-wasm/fox_soundwave_wasm.js'
+import initEar, { get_media_info_streaming, measure_lufs_streaming } from './pkg/waz-stinger-wasm/waz_stinger_wasm.js'
+import initWave, { extract_peaks_streaming } from './pkg/waz-wave-wasm/waz_wave_wasm.js'
 import initStrip, {
   scan_keyframes_streaming,
   scan_samples_streaming,
   get_keyframe_bytes_streaming,
   select_thumbnail_keyframes,
-} from './pkg/fox-strip-wasm/fox_strip_wasm.js'
+} from './pkg/waz-strip-wasm/waz_strip_wasm.js'
 
-import type { FoxRequest, FoxResponse } from './protocol'
+import type { WazRequest, WazResponse } from './protocol'
 
 // Lazily initialise each module the first time it's needed; cache the promise.
 const inits: Record<'ear' | 'wave' | 'strip', Promise<unknown> | null> = {
@@ -49,7 +49,7 @@ function makeReader(file: File): Reader {
   }
 }
 
-self.onmessage = async (e: MessageEvent<FoxRequest>) => {
+self.onmessage = async (e: MessageEvent<WazRequest>) => {
   const { id, op, file, args } = e.data
   try {
     const read = makeReader(file)
@@ -98,11 +98,11 @@ self.onmessage = async (e: MessageEvent<FoxRequest>) => {
         throw new Error(`unknown op: ${op as string}`)
     }
 
-    const response = { id, ok: true, result } as FoxResponse
+    const response = { id, ok: true, result } as WazResponse
     self.postMessage(response, transfer)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    const response: FoxResponse = { id, ok: false, error: message }
+    const response: WazResponse = { id, ok: false, error: message }
     self.postMessage(response)
   }
 }

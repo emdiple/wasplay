@@ -72,46 +72,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af9673d8203fcb076b19dfd17e38b3d4ae9f44959416ea532ce72415a6020365"
 
 [[package]]
-name = "fox-ear-wasm"
-version = "0.1.0"
-dependencies = [
- "ebur128",
- "js-sys",
- "symphonia",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "fox-edl-wasm"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "fox-soundwave-wasm"
-version = "0.1.0"
-dependencies = [
- "js-sys",
- "symphonia",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "fox-strip-wasm"
-version = "0.1.0"
-dependencies = [
- "js-sys",
- "serde",
- "serde-wasm-bindgen",
- "serde_json",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "futures-core"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -505,6 +465,46 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc1b4cb0cc549fcf58d7dfc081778139b3d283a081644e833e84682ad71cea24"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "waz-edl-wasm"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "waz-stinger-wasm"
+version = "0.1.0"
+dependencies = [
+ "ebur128",
+ "js-sys",
+ "symphonia",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "waz-strip-wasm"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "waz-wave-wasm"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "symphonia",
+ "wasm-bindgen",
 ]
 
 [[package]]

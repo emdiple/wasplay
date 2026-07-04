@@ -70,7 +70,7 @@ export function Timeline() {
   const { marqueeRect, beginMarquee } = useMarquee(contentRef, videoRef, audioRef)
 
   const handleDrop = (e: React.DragEvent) => {
-    const id = e.dataTransfer.getData('text/fox-source')
+    const id = e.dataTransfer.getData('text/waz-source')
     const store = useEditorStore.getState()
     const src = store.sources.find((s) => s.id === id)
     if (!src) return

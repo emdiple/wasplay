@@ -1,5 +1,5 @@
 [package]
-name = "fox-strip-wasm"
+name = "waz-strip-wasm"
 version = "0.1.0"
 edition = "2024"
 
