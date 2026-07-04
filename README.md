@@ -1,9 +1,9 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="public/branding/dark-logo-github.png">
-  <source media="(prefers-color-scheme: light)" srcset="public/branding/light-logo-github.png">
-  <img alt="Wazplay" src="public/branding/light-logo-github.png" width="480">
+  <source media="(prefers-color-scheme: dark)" srcset="public/branding/light-logo-github.png">
+  <source media="(prefers-color-scheme: light)" srcset="public/branding/dark-logo-github.png">
+  <img alt="Wazplay" src="public/branding/dark-logo-github.png" width="480">
 </picture>
 
 ### A professional-grade video editor that runs entirely in your browser
