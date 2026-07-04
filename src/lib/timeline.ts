@@ -105,6 +105,7 @@ export function splitLinkGroupAt(
           in: c.in + offset,
           dur: c.dur - offset,
           z: c.z, // keep the same stacking order as the clip it was cut from
+          gainDb: c.gainDb, // both halves inherit the parent clip's level
         }
         rights.push(right)
         out.push(left, right)

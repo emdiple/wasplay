@@ -1,13 +1,15 @@
 import { useRef } from 'react'
 import { useEditorStore } from '../store/editorStore'
 import { useControls } from '../context/ControlsContext'
+import { useMediaQuery, COMPACT_QUERY } from '../hooks/useMediaQuery'
 import { usePreviewTrack } from '../hooks/usePreviewTrack'
 import { hsl } from '../lib/color'
 import { formatTC } from '../lib/format'
-import { clipAtTime, domainSeconds } from '../lib/timeline'
+import { clipAtTime } from '../lib/timeline'
+import { TransportBar } from './TransportBar'
 import type { Source } from '../types'
 
-/** Centre panel: the preview stage + master timecode. Once the timeline has
+/** Centre panel: the preview stage + the transport bar. Once the timeline has
  * any clips, the stage becomes a "program monitor" following the playhead;
  * otherwise it shows the selected bin source (or the welcome card). */
 export function Preview() {
@@ -20,7 +22,7 @@ export function Preview() {
       <div className="stage">
         {hasTimelineContent ? <ProgramMonitor /> : src ? <SourceCard src={src} key={selectedSrcId} /> : <DefaultCard />}
       </div>
-      <Timecode />
+      <TransportBar />
     </div>
   )
 }
@@ -40,7 +42,6 @@ function ProgramMonitor() {
   const audioClips = useEditorStore((s) => s.audioClips)
   const sources = useEditorStore((s) => s.sources)
   const previewMuted = useEditorStore((s) => s.previewMuted)
-  const togglePreviewMuted = useEditorStore((s) => s.togglePreviewMuted)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -59,7 +60,12 @@ function ProgramMonitor() {
   const videoLocalTime = activeVideoClip ? playheadTime - activeVideoClip.start + activeVideoClip.in : 0
   const audioLocalTime = activeAudioClip ? playheadTime - activeAudioClip.start + activeAudioClip.in : 0
 
-  usePreviewTrack(videoRef, activeVideoClip, videoSource, transport.playing, videoLocalTime, previewMuted || !linked)
+  // Whichever element is actually sounding uses the audio clip's per-clip gain:
+  // when linked, the video plays the pair's embedded audio, so it carries the
+  // level; when detached, the audio element does.
+  const gainDb = activeAudioClip?.gainDb ?? 0
+
+  usePreviewTrack(videoRef, activeVideoClip, videoSource, transport.playing, videoLocalTime, previewMuted || !linked, gainDb)
   usePreviewTrack(
     audioRef,
     linked ? null : activeAudioClip,
@@ -67,23 +73,14 @@ function ProgramMonitor() {
     transport.playing,
     audioLocalTime,
     previewMuted,
+    gainDb,
   )
-
-  const hasAudioAtPlayhead = linked ? (videoSource?.hasAudio ?? false) : !!activeAudioClip
 
   return (
     <div className="program-monitor">
       <video ref={videoRef} className="program-video" playsInline style={{ display: activeVideoClip ? 'block' : 'none' }} />
       {!activeVideoClip && <div className="program-blank" />}
       <audio ref={audioRef} hidden />
-      <button
-        className="program-mute"
-        onClick={togglePreviewMuted}
-        title={previewMuted ? 'Unmute preview' : 'Mute preview'}
-        disabled={!hasAudioAtPlayhead}
-      >
-        {previewMuted || !hasAudioAtPlayhead ? '🔇' : '🔊'}
-      </button>
     </div>
   )
 }
@@ -105,6 +102,15 @@ function DefaultCard() {
 
 function SourceCard({ src }: { src: Source }) {
   const openAnalyzer = useEditorStore((s) => s.openAnalyzer)
+  const inspectorOpen = useEditorStore((s) => s.inspectorOpen)
+  const toggleInspector = useEditorStore((s) => s.toggleInspector)
+  const compact = useMediaQuery(COMPACT_QUERY)
+  // Desktop shows this staged source in the Inspector already — just reveal it;
+  // mobile opens the Analyzer modal.
+  const inspect = () => {
+    if (compact) openAnalyzer(src.id)
+    else if (!inspectorOpen) toggleInspector()
+  }
 
   const parts: string[] = [src.isVideo ? 'Video' : 'Audio', formatTC(src.duration)]
   if (src.isVideo && src.width) parts.push(`${src.width}×${src.height}`)
@@ -122,21 +128,10 @@ function SourceCard({ src }: { src: Source }) {
       </div>
       <div className="stage-name">{src.name}</div>
       <div className="stage-hint">{parts.filter(Boolean).join(' · ')}</div>
-      <button className="btn" onClick={() => openAnalyzer(src.id)}>
-        ⌕ Analyze media
+      <button className="btn" onClick={inspect}>
+        ⌕ Inspect media
       </button>
     </div>
   )
 }
 
-function Timecode() {
-  const playheadTime = useEditorStore((s) => s.playheadTime)
-  const total = useEditorStore((s) => domainSeconds(s.videoClips, s.audioClips))
-
-  return (
-    <div className="timecode">
-      <span>{formatTC(playheadTime)}</span>
-      <small>/ {formatTC(total)}</small>
-    </div>
-  )
-}

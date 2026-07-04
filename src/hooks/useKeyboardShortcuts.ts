@@ -47,6 +47,22 @@ export function useKeyboardShortcuts(transport: TransportControls): void {
           e.preventDefault()
           transport.toggle()
           break
+        case 'ArrowLeft':
+          e.preventDefault()
+          transport.stepFrame(-1)
+          break
+        case 'ArrowRight':
+          e.preventDefault()
+          transport.stepFrame(1)
+          break
+        case 'Home':
+          e.preventDefault()
+          transport.goToStart()
+          break
+        case 'End':
+          e.preventDefault()
+          transport.goToEnd()
+          break
       }
     }
     window.addEventListener('keydown', onKeyDown)

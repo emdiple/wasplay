@@ -2,12 +2,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { useEditorStore } from '../store/editorStore'
 import { timelineEnd } from '../lib/timeline'
+import { EXPORT_FPS } from '../export/project'
 
 export interface TransportControls {
   playing: boolean
   play: () => void
   pause: () => void
   toggle: () => void
+  /** Move the playhead to an absolute time (clamped to the timeline), pausing playback. */
+  seek: (t: number) => void
+  /** Step one frame forward (dir=1) or back (dir=-1) at the project frame rate. */
+  stepFrame: (dir: 1 | -1) => void
+  goToStart: () => void
+  goToEnd: () => void
+  /** Project frame rate used for frame-accurate stepping. */
+  fps: number
 }
 
 /**
@@ -67,8 +76,40 @@ export function useTransport(scrollRef: RefObject<HTMLDivElement | null>): Trans
     else play()
   }, [play, pause])
 
+  // Move the playhead to an absolute, clamped time. Pauses first so a manual
+  // scrub/step never fights the running rAF loop.
+  const seek = useCallback(
+    (t: number) => {
+      pause()
+      const s = useEditorStore.getState()
+      const end = timelineEnd(s.videoClips, s.audioClips)
+      s.setPlayhead(Math.max(0, Math.min(end, t)))
+      autoScroll()
+    },
+    [pause, autoScroll],
+  )
+
+  const stepFrame = useCallback(
+    (dir: 1 | -1) => {
+      // Snap to the frame grid before stepping so repeated steps stay aligned.
+      const t = useEditorStore.getState().playheadTime
+      const frame = Math.round(t * EXPORT_FPS)
+      seek((frame + dir) / EXPORT_FPS)
+    },
+    [seek],
+  )
+
+  const goToStart = useCallback(() => seek(0), [seek])
+  const goToEnd = useCallback(() => {
+    const s = useEditorStore.getState()
+    seek(timelineEnd(s.videoClips, s.audioClips))
+  }, [seek])
+
   // Stop the RAF loop if the component unmounts mid-playback.
   useEffect(() => () => void (rafRef.current !== null && cancelAnimationFrame(rafRef.current)), [])
 
-  return useMemo(() => ({ playing, play, pause, toggle }), [playing, play, pause, toggle])
+  return useMemo(
+    () => ({ playing, play, pause, toggle, seek, stepFrame, goToStart, goToEnd, fps: EXPORT_FPS }),
+    [playing, play, pause, toggle, seek, stepFrame, goToStart, goToEnd],
+  )
 }

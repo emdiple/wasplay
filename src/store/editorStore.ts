@@ -12,6 +12,7 @@ import type { Clip, Source, Tool } from '../types'
 import { formatTC } from '../lib/format'
 import { nextZ, uid } from '../lib/id'
 import { linkedPartner, linksAtTime, splitLinkGroupAt, trackEnd } from '../lib/timeline'
+import { clampGainDb } from '../lib/loudness'
 import { initialTheme, persistTheme, readStoredTheme, type Theme } from '../lib/theme'
 
 /** Position + target clip for the clip right-click menu; null when closed. */
@@ -53,6 +54,12 @@ interface EditorState {
   theme: Theme
   themeExplicit: boolean // true once the user has manually toggled (stop following OS)
 
+  // ── Resizable panels (desktop/tablet; ignored in the mobile layout) ──
+  binW: number // media-bin column width, px
+  trackScale: number // timeline track-height multiplier (1 = default)
+  inspectorW: number // right inspector width, px
+  inspectorOpen: boolean // whether the right inspector is shown
+
   // ── App lock / status ──
   busy: boolean
   loadingMsg: string
@@ -63,6 +70,20 @@ interface EditorState {
   snapshot: () => void
   undo: () => void
   redo: () => void
+
+  /** Replace the document + view state from a restored session (clears history/selection). */
+  hydrate: (doc: {
+    sources: Source[]
+    videoClips: Clip[]
+    audioClips: Clip[]
+    pxPerSec: number
+    playheadTime: number
+    selectedSrcId: string | null
+    binW?: number
+    trackScale?: number
+    inspectorW?: number
+    inspectorOpen?: boolean
+  }) => void
 
   // ── Source actions ──
   addSource: (src: Source) => void
@@ -77,6 +98,9 @@ interface EditorState {
   placeSource: (srcId: string, at: number) => void
   appendSource: (srcId: string) => void
   setClipStarts: (starts: Map<string, number>) => void
+  /** Set the output gain (dB) on the given clips. Does not snapshot — the caller
+   *  snapshots once at the start of an interaction (see the clip inspector). */
+  setClipGain: (clipIds: Iterable<string>, gainDb: number) => void
   cutLinkedAt: (link: string, t: number) => boolean
   splitAtPlayhead: () => void
   deleteSelected: () => void
@@ -101,6 +125,10 @@ interface EditorState {
   // ── View actions ──
   setTool: (tool: Tool) => void
   setPxPerSec: (pxPerSec: number) => void
+  setBinW: (px: number) => void
+  setTrackScale: (scale: number) => void
+  setInspectorW: (px: number) => void
+  toggleInspector: () => void
   setPlayhead: (t: number) => void
   togglePreviewMuted: () => void
   setExportOpen: (open: boolean) => void
@@ -130,6 +158,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   tool: 'select',
   pxPerSec: 40,
+  binW: 260,
+  trackScale: 1,
+  inspectorW: 300,
+  inspectorOpen: true,
   playheadTime: 0,
   previewMuted: false,
   theme: initialTheme(),
@@ -184,6 +216,26 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     }),
 
+  hydrate: (doc) =>
+    set({
+      sources: doc.sources,
+      videoClips: doc.videoClips,
+      audioClips: doc.audioClips,
+      pxPerSec: doc.pxPerSec,
+      playheadTime: doc.playheadTime,
+      selectedSrcId: doc.selectedSrcId,
+      ...(doc.binW != null ? { binW: doc.binW } : {}),
+      ...(doc.trackScale != null ? { trackScale: doc.trackScale } : {}),
+      ...(doc.inspectorW != null ? { inspectorW: doc.inspectorW } : {}),
+      ...(doc.inspectorOpen != null ? { inspectorOpen: doc.inspectorOpen } : {}),
+      // A restored session starts with a clean slate for transient/history state.
+      selection: new Set(),
+      past: [],
+      future: [],
+      contextMenu: null,
+      analyzerSrcId: null,
+    }),
+
   addSource: (src) =>
     set((state) => ({
       sources: [...state.sources, src],
@@ -226,8 +278,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((state) => {
       const videoClips = [...state.videoClips]
       const audioClips = [...state.audioClips]
-      if (src.isVideo) videoClips.push({ id: uid(), sourceId: src.id, link, start, in: 0, dur: src.duration, z: nextZ() })
-      if (src.hasAudio) audioClips.push({ id: uid(), sourceId: src.id, link, start, in: 0, dur: src.duration, z: nextZ() })
+      // New clips inherit the source's current gain as a starting point; each
+      // clip is independently adjustable from the timeline afterwards.
+      const seed = { link, start, in: 0, dur: src.duration, gainDb: src.gainDb }
+      if (src.isVideo) videoClips.push({ id: uid(), sourceId: src.id, z: nextZ(), ...seed })
+      if (src.hasAudio) audioClips.push({ id: uid(), sourceId: src.id, z: nextZ(), ...seed })
       return { videoClips, audioClips, selectedSrcId: src.id }
     })
   },
@@ -240,6 +295,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setClipStarts: (starts) =>
     set((state) => {
       const apply = (clips: Clip[]) => clips.map((c) => (starts.has(c.id) ? { ...c, start: starts.get(c.id)! } : c))
+      return { videoClips: apply(state.videoClips), audioClips: apply(state.audioClips) }
+    }),
+
+  setClipGain: (clipIds, gainDb) =>
+    set((state) => {
+      const ids = new Set(clipIds)
+      const g = clampGainDb(gainDb)
+      const apply = (clips: Clip[]) => clips.map((c) => (ids.has(c.id) ? { ...c, gainDb: g } : c))
       return { videoClips: apply(state.videoClips), audioClips: apply(state.audioClips) }
     }),
 
@@ -382,6 +445,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setTool: (tool) => set({ tool }),
   setPxPerSec: (pxPerSec) => set({ pxPerSec }),
+  setBinW: (px) => set({ binW: Math.max(190, Math.min(560, px)) }),
+  setTrackScale: (scale) => set({ trackScale: Math.max(0.55, Math.min(2.8, scale)) }),
+  setInspectorW: (px) => set({ inspectorW: Math.max(240, Math.min(520, px)) }),
+  toggleInspector: () => set((s) => ({ inspectorOpen: !s.inspectorOpen })),
   setPlayhead: (t) => set({ playheadTime: Math.max(0, t) }),
   togglePreviewMuted: () => set((state) => ({ previewMuted: !state.previewMuted })),
   setExportOpen: (open) => set({ exportOpen: open }),

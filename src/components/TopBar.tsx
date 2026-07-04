@@ -7,16 +7,13 @@ interface TopBarProps {
   importFiles: (files: FileList) => void
 }
 
-/** Top toolbar: import, tools, transport, zoom, clear, and the status line. */
+/** App bar: brand, import, undo/redo, theme, export, clear, and the status line.
+ *  Editing tools live in the left ToolRail; transport lives under the preview. */
 export function TopBar({ importFiles }: TopBarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const { zoom, transport } = useControls()
+  const { transport } = useControls()
 
-  const tool = useEditorStore((s) => s.tool)
-  const pxPerSec = useEditorStore((s) => s.pxPerSec)
   const status = useEditorStore((s) => s.status)
-  const setTool = useEditorStore((s) => s.setTool)
-  const deleteSelected = useEditorStore((s) => s.deleteSelected)
   const clearTimeline = useEditorStore((s) => s.clearTimeline)
   const setExportOpen = useEditorStore((s) => s.setExportOpen)
   const theme = useEditorStore((s) => s.theme)
@@ -25,8 +22,8 @@ export function TopBar({ importFiles }: TopBarProps) {
   const redo = useEditorStore((s) => s.redo)
   const canUndo = useEditorStore((s) => s.past.length > 0)
   const canRedo = useEditorStore((s) => s.future.length > 0)
-
-  const zoomLabel = (pxPerSec < 10 ? pxPerSec.toFixed(1) : Math.round(pxPerSec)) + ' px/s'
+  const inspectorOpen = useEditorStore((s) => s.inspectorOpen)
+  const toggleInspector = useEditorStore((s) => s.toggleInspector)
 
   const onClear = () => {
     transport.pause()
@@ -51,7 +48,7 @@ export function TopBar({ importFiles }: TopBarProps) {
 
       <div className="toolbar-group">
         <button className="btn primary" onClick={() => fileInputRef.current?.click()}>
-          ＋ Import media
+          ＋ <span className="btn-label">Import media</span>
         </button>
       </div>
 
@@ -59,70 +56,42 @@ export function TopBar({ importFiles }: TopBarProps) {
 
       <div className="toolbar-group">
         <button className="btn icon" title="Undo (⌘Z)" onClick={undo} disabled={!canUndo}>
-          ↶ Undo
+          ↶ <span className="btn-label">Undo</span>
         </button>
         <button className="btn icon" title="Redo (⇧⌘Z)" onClick={redo} disabled={!canRedo}>
-          ↷ Redo
+          ↷ <span className="btn-label">Redo</span>
         </button>
       </div>
 
-      <div className="sep" />
-
-      <div className="toolbar-group">
-        <button
-          className={'btn icon' + (tool === 'select' ? ' active' : '')}
-          title="Select / move (V)"
-          onClick={() => setTool('select')}
-        >
-          ▲ Select
-        </button>
-        <button
-          className={'btn icon' + (tool === 'cut' ? ' active' : '')}
-          title="Cut / razor (C)"
-          onClick={() => setTool('cut')}
-        >
-          ✂ Cut
-        </button>
-        <button className="btn icon" title="Delete selected (⌫)" onClick={deleteSelected}>
-          🗑 Delete
-        </button>
-      </div>
-
-      <div className="sep" />
-
-      <div className="toolbar-group">
-        <button className="btn icon" title="Play / pause (Space)" onClick={transport.toggle}>
-          {transport.playing ? '❚❚' : '▶'}
-        </button>
-      </div>
+      <span className="status">{status}</span>
 
       <div className="spacer" />
 
       <div className="toolbar-group">
-        <button className="btn icon" title="Zoom out" onClick={zoom.zoomOut}>
-          －
+        <button
+          className="btn icon"
+          title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          onClick={toggleTheme}
+        >
+          {theme === 'dark' ? '☀' : '☾'}
         </button>
-        <span className="zoom-label">{zoomLabel}</span>
-        <button className="btn icon" title="Zoom in" onClick={zoom.zoomIn}>
-          ＋
+        <button
+          className={'btn icon inspector-toggle' + (inspectorOpen ? ' active' : '')}
+          title={inspectorOpen ? 'Hide inspector' : 'Show inspector'}
+          onClick={toggleInspector}
+        >
+          ▤
         </button>
       </div>
 
       <div className="sep" />
-      <button
-        className="btn icon"
-        title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-        onClick={toggleTheme}
-      >
-        {theme === 'dark' ? '☀' : '☾'}
-      </button>
+
       <button className="btn primary" title="Export EDL or render media" onClick={() => setExportOpen(true)}>
-        ⬆ Export
+        ⬆ <span className="btn-label">Export</span>
       </button>
       <button className="btn icon" title="Clear timeline" onClick={onClear}>
         Clear
       </button>
-      <span className="status">{status}</span>
     </header>
   )
 }

@@ -47,6 +47,12 @@ export function useMarquee(
   const beginMarquee = (e: React.PointerEvent) => {
     const store = useEditorStore.getState()
     if (store.tool !== 'select' || e.button !== 0) return
+    // Touch: no rubber-band — a tap clears the selection (same as a bare click)
+    // and a drag pans the timeline natively (see touch-action in global.css).
+    if (e.pointerType === 'touch') {
+      store.clearSelection()
+      return
+    }
     const content = contentRef.current
     if (!content) return
 
