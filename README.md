@@ -42,9 +42,10 @@ media stays at flat memory** regardless of input size (see
 for **hardware-accelerated export with no native dependencies**.
 
 > **Project status — active development.** Editing, analysis, and export are
-> functional end-to-end. Live preview during playback is a single-clip program
-> monitor (it plays whichever clip sits under the playhead) rather than a fully
-> composited multi-layer render — see the [Roadmap](#roadmap).
+> functional end-to-end, including a live program monitor that follows the
+> playhead and a hardware-accelerated render pipeline. The timeline is currently
+> single-layer (one video + one audio track); multi-track compositing, effects,
+> and a fully WYSIWYG preview are on the [Roadmap](#roadmap).
 
 ## Features
 
@@ -223,10 +224,9 @@ demand).
 
 ## Roadmap
 
-- **Composited live preview** — a true program monitor that renders the mixed timeline in real time, rather than the current single-clip-under-playhead preview.
-- **Multi-track timeline** — more than one video/audio layer.
-- **Transitions & effects** — cross-dissolves, speed changes, filters.
-- **Worker-based render** — move the export render loop fully off the main thread for a consistently responsive UI on long timelines.
+- **Multi-track timeline** — more than one video/audio layer, with the live preview rendered through the same compositor as export for a fully WYSIWYG program monitor.
+- **Transitions & effects** — cross-dissolves, speed changes, filters, keyframable properties.
+- **Worker-based render orchestration** — the decode/encode already run on hardware (WebCodecs) via a demux + `VideoDecoder` fast path; moving the render *loop* itself into a Worker would keep the UI fully responsive on long exports.
 
 ## Contributing
 
