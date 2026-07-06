@@ -73,7 +73,12 @@ function pickWorker(): number {
   return best
 }
 
-function call<Op extends WazOp>(op: Op, file: File, args: WazOps[Op]['args']): Promise<WazOps[Op]['result']> {
+function call<Op extends WazOp>(
+  op: Op,
+  file: File,
+  args: WazOps[Op]['args'],
+  transfer: Transferable[] = [],
+): Promise<WazOps[Op]['result']> {
   const workerIndex = pickWorker()
   const w = workers[workerIndex]!
   const id = ++seq
@@ -81,7 +86,7 @@ function call<Op extends WazOp>(op: Op, file: File, args: WazOps[Op]['args']): P
   return new Promise<WazOps[Op]['result']>((resolve, reject) => {
     pending.set(id, { resolve: resolve as (v: unknown) => void, reject, workerIndex })
     const request: WazRequest<Op> = { id, op, file, args }
-    w.postMessage(request)
+    w.postMessage(request, transfer)
   })
 }
 
@@ -90,6 +95,12 @@ export const waz = {
   mediaInfo: (file: File) => call('mediaInfo', file, {}),
   /** Integrated loudness in LUFS. */
   lufs: (file: File) => call('lufs', file, {}),
+  /**
+   * Integrated loudness from pre-decoded interleaved f32 PCM (WebAudio
+   * fallback for codecs symphonia lacks, e.g. Opus). Transfers `samples`.
+   */
+  lufsSamples: (file: File, samples: Float32Array, sampleRate: number, channels: number) =>
+    call('lufsSamples', file, { samples, sampleRate, channels }, [samples.buffer]),
   /** Waveform peaks in [0,1] — a Float32Array of length `numPeaks`. */
   peaks: (file: File, numPeaks: number) => call('peaks', file, { numPeaks }),
   /** Scan keyframes + pick `count` evenly-spaced ones. */

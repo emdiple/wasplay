@@ -11,7 +11,11 @@
 
 /// <reference lib="webworker" />
 
-import initEar, { get_media_info_streaming, measure_lufs_streaming } from './pkg/waz-stinger-wasm/waz_stinger_wasm.js'
+import initEar, {
+  get_media_info_streaming,
+  measure_lufs_streaming,
+  measure_lufs,
+} from './pkg/waz-stinger-wasm/waz_stinger_wasm.js'
 import initWave, { extract_peaks_streaming } from './pkg/waz-wave-wasm/waz_wave_wasm.js'
 import initStrip, {
   scan_keyframes_streaming,
@@ -65,6 +69,12 @@ self.onmessage = async (e: MessageEvent<WazRequest>) => {
       case 'lufs': {
         await ensure('ear')
         result = measure_lufs_streaming(read, file.size)
+        break
+      }
+      case 'lufsSamples': {
+        await ensure('ear')
+        const { samples, sampleRate, channels } = args as { samples: Float32Array; sampleRate: number; channels: number }
+        result = measure_lufs(samples, sampleRate, channels)
         break
       }
       case 'peaks': {
