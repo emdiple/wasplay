@@ -1,16 +1,19 @@
 /**
  * thumbnails.ts — timeline thumbnail generator.
  *
- * The MP4 keyframe scan runs in the worker, which reads only the `moov` box from
- * the File via FileReaderSync — the full video is never loaded into memory.
+ * The MP4/MOV keyframe scan runs in the worker, which reads only the `moov` box
+ * from the File via FileReaderSync — the full video is never loaded into memory.
  *
  * Fast path (Chrome/Edge): worker returns keyframe byte offsets → main thread
  *   fetches each keyframe's bytes from the worker → WebCodecs hardware-decodes →
  *   OffscreenCanvas → ImageBitmap.
  *
- * Fallback (Safari / Firefox): a hidden <video> element seeks to each keyframe
- *   timestamp → canvas capture → ImageBitmap. Slower but works in any browser
- *   that can play the file, and still avoids reading the whole file into a buffer.
+ * Fallback (Safari / Firefox, or any container/codec the scanner doesn't
+ *   understand — WebM, MKV, VP9-in-MP4, …): a hidden <video> element seeks to
+ *   each timestamp → canvas capture → ImageBitmap. Works for anything the
+ *   browser can play, and still avoids reading the whole file into a buffer.
+ *   When the scan produced no keyframe list, timestamps are simply spaced
+ *   evenly across the element's own duration.
  */
 
 import { waz } from './wazClient'
@@ -31,17 +34,30 @@ export async function generateThumbnails(
   { count = 10, width = 160, height = 90 }: ThumbnailOptions = {},
 ): Promise<Thumbnail[]> {
   // 1. Scan container in the worker (reads only the moov box) + pick indices.
-  const { scan, selected } = await waz.scan(file, count)
-
-  if (!scan.keyframes.length) {
-    throw new Error('No keyframes found — is this a valid MP4/MOV with video?')
+  //    The scanner only understands ISO-BMFF (MP4/MOV) with H.264/HEVC; for
+  //    everything else, skip straight to the <video>-seek fallback.
+  let scan: ScanResult | null = null
+  let selectedKfs: KeyframeInfo[] = []
+  try {
+    const res = await waz.scan(file, count)
+    if (res.scan.keyframes.length) {
+      scan = res.scan
+      selectedKfs = res.selected.map((i) => res.scan.keyframes[i])
+    }
+  } catch {
+    // Unsupported container/codec for the scanner — fall through.
   }
 
-  const selectedKfs = selected.map((i) => scan.keyframes[i])
+  if (!scan) return decodeViaVideoSeekEven(file, count, width, height)
 
-  // 2a. WebCodecs fast path (Chrome 94+, Edge 94+)
+  // 2a. WebCodecs fast path (Chrome 94+, Edge 94+). A mid-decode failure
+  //     (bad codec string, corrupt sample) still lands on the seek fallback.
   if ('VideoDecoder' in globalThis) {
-    return decodeViaWebCodecs(file, scan, selectedKfs, width, height)
+    try {
+      return await decodeViaWebCodecs(file, scan, selectedKfs, width, height)
+    } catch {
+      return decodeViaVideoSeekEven(file, count, width, height)
+    }
   }
 
   // 2b. Fallback: seek a hidden <video> element (Safari, Firefox, …)
@@ -143,32 +159,76 @@ function decodeOneFrame(
 
 // ── Video-seek fallback ───────────────────────────────────────────────────────
 
+/** Load `file` into a hidden <video>, capture a frame at each of `times`. */
+async function captureAtTimes(
+  video: HTMLVideoElement,
+  times: number[],
+  thumbW: number,
+  thumbH: number,
+): Promise<Thumbnail[]> {
+  const results: Thumbnail[] = []
+  for (const t of times) {
+    const bitmap = await seekAndCapture(video, t, thumbW, thumbH)
+    results.push({ bitmap, timestamp_s: t })
+  }
+  return results
+}
+
+function loadVideo(file: File): Promise<{ video: HTMLVideoElement; url: string }> {
+  const url = URL.createObjectURL(file)
+  const video = document.createElement('video')
+  video.muted = true
+  video.preload = 'auto'
+  video.src = url
+  return new Promise((resolve, reject) => {
+    video.addEventListener('loadedmetadata', () => resolve({ video, url }), { once: true })
+    video.addEventListener(
+      'error',
+      () => {
+        URL.revokeObjectURL(url)
+        reject(new Error('Video load error'))
+      },
+      { once: true },
+    )
+  })
+}
+
 async function decodeViaVideoSeek(
   file: File,
   keyframes: KeyframeInfo[],
   thumbW: number,
   thumbH: number,
 ): Promise<Thumbnail[]> {
-  const url = URL.createObjectURL(file)
-  const video = document.createElement('video')
-  video.muted = true
-  video.preload = 'auto'
-  video.src = url
-
-  await new Promise<void>((resolve, reject) => {
-    video.addEventListener('loadedmetadata', () => resolve(), { once: true })
-    video.addEventListener('error', () => reject(new Error('Video load error')), { once: true })
-  })
-
-  const results: Thumbnail[] = []
-  for (const kf of keyframes) {
-    const bitmap = await seekAndCapture(video, kf.timestamp_s, thumbW, thumbH)
-    results.push({ bitmap, timestamp_s: kf.timestamp_s })
+  const { video, url } = await loadVideo(file)
+  try {
+    return await captureAtTimes(video, keyframes.map((kf) => kf.timestamp_s), thumbW, thumbH)
+  } finally {
+    URL.revokeObjectURL(url)
+    video.src = ''
   }
+}
 
-  URL.revokeObjectURL(url)
-  video.src = ''
-  return results
+/**
+ * No keyframe list (container/codec the scanner can't parse) — space `count`
+ * capture points evenly across the element's own duration. Bucket midpoints
+ * avoid the black first frame and end-of-stream seeks.
+ */
+async function decodeViaVideoSeekEven(
+  file: File,
+  count: number,
+  thumbW: number,
+  thumbH: number,
+): Promise<Thumbnail[]> {
+  const { video, url } = await loadVideo(file)
+  try {
+    const duration = isFinite(video.duration) ? video.duration : 0
+    if (duration <= 0) throw new Error('Video reports no duration')
+    const times = Array.from({ length: count }, (_, i) => ((i + 0.5) / count) * duration)
+    return await captureAtTimes(video, times, thumbW, thumbH)
+  } finally {
+    URL.revokeObjectURL(url)
+    video.src = ''
+  }
 }
 
 function seekAndCapture(video: HTMLVideoElement, time: number, width: number, height: number): Promise<ImageBitmap> {
