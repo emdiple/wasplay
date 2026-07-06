@@ -55,7 +55,7 @@ for **hardware-accelerated export with no native dependencies**.
 - **Non-linear timeline** — single-layer (one video track, one audio track) editing: drag-to-arrange with snapping, marquee multi-select, a playhead-anchored razor that cuts linked A/V together, and zoom-to-fit on a timeline that scales to long media.
 - **Broadcast-grade audio analysis** — per-source panel with container/codec info, **integrated loudness (EBU R128 / LUFS) with gain-to-target**, decoded waveforms, and keyframe thumbnails, all reusing the same decoded data as the timeline. Per-source and per-clip gain (dB) driven by real LUFS measurement.
 - **Real export, in the browser, two ways:**
-  - **Render** the timeline to a downloadable **MP4** (H.264 / AAC) or **WebM** (VP9 or VP8 / Opus) entirely in-browser via the **hardware-accelerated WebCodecs API**, muxed on the client, with a native save-location picker where supported.
+  - **Render** the timeline to a downloadable **MP4** (AV1 or HEVC where hardware-encoded, else H.264 / AAC) or **WebM** (AV1, VP9 or VP8 / Opus) entirely in-browser via the **hardware-accelerated WebCodecs API**, muxed on the client, with a native save-location picker where supported.
   - **Frame-accurate EDL export** — a JSON edit list plus a best-effort FFmpeg `filter_complex` command, for finishing in external tools.
 - **Session persistence** — projects survive reloads (IndexedDB + `localStorage`); resizable, responsive workspace panels.
 
@@ -118,7 +118,7 @@ fully loaded into memory.
 | --- | --- |
 | [`waz-stinger-wasm`](crates/waz-stinger-wasm) | Media probe + loudness (EBU R128 / LUFS) |
 | [`waz-wave-wasm`](crates/waz-wave-wasm) | Waveform peak extraction |
-| [`waz-strip-wasm`](crates/waz-strip-wasm) | MP4 keyframe scanner (no video decode) |
+| [`waz-strip-wasm`](crates/waz-strip-wasm) | MP4/MOV keyframe scanner (no video decode) |
 | [`waz-edl-wasm`](crates/waz-edl-wasm) | Stateless EDL / timeline export engine |
 
 **Streaming core.** Rather than load a file into an `ArrayBuffer` (which can

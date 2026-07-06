@@ -34,7 +34,7 @@ export async function generateThumbnails(
   const { scan, selected } = await waz.scan(file, count)
 
   if (!scan.keyframes.length) {
-    throw new Error('No keyframes found — is this a valid MP4 with video?')
+    throw new Error('No keyframes found — is this a valid MP4/MOV with video?')
   }
 
   const selectedKfs = selected.map((i) => scan.keyframes[i])

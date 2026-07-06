@@ -52,16 +52,17 @@ function createMuxer(
       target,
       fastStart: 'in-memory',
       firstTimestampBehavior: 'offset',
-      video: { codec: 'avc', width, height },
+      video: { codec: plan.video.muxerCodec as 'avc' | 'hevc' | 'av1', width, height },
       audio: plan.audio ? { codec: 'aac', numberOfChannels: CHANNELS, sampleRate: SAMPLE_RATE } : undefined,
     })
     return { muxer: muxer as unknown as AnyMuxer, target }
   }
   const target = new WebmTarget()
+  const webmCodec = plan.video.muxerCodec === 'av1' ? 'V_AV1' : plan.video.muxerCodec === 'vp9' ? 'V_VP9' : 'V_VP8'
   const muxer = new WebmMuxer({
     target,
     firstTimestampBehavior: 'offset',
-    video: { codec: plan.video.muxerCodec === 'vp9' ? 'V_VP9' : 'V_VP8', width, height, frameRate: fps },
+    video: { codec: webmCodec, width, height, frameRate: fps },
     audio: plan.audio ? { codec: 'A_OPUS', numberOfChannels: CHANNELS, sampleRate: SAMPLE_RATE } : undefined,
   })
   return { muxer: muxer as unknown as AnyMuxer, target }
@@ -94,6 +95,11 @@ export async function exportProject({ edl, sources, onStage, onProgress, signal 
   })
   const vcfg: VideoEncoderConfig = { codec: plan.video.codec, width, height, bitrate: plan.video.bitrate, framerate: fps }
   if (plan.video.codec.startsWith('avc')) vcfg.avc = { format: 'avc' }
+  // `hevc` is in the WebCodecs spec but missing from @types/dom-webcodecs 0.1.x.
+  if (plan.video.muxerCodec === 'hevc')
+    (vcfg as VideoEncoderConfig & { hevc?: { format: 'hevc' | 'annexb' } }).hevc = { format: 'hevc' }
+  // AV1/HEVC were only picked because a hardware encoder exists — hold it to that.
+  if (plan.video.hardware) vcfg.hardwareAcceleration = 'prefer-hardware'
   videoEncoder.configure(vcfg)
 
   onStage?.('video')
