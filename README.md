@@ -1,9 +1,15 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="public/branding/light-logo-github.png">
-  <source media="(prefers-color-scheme: light)" srcset="public/branding/dark-logo-github.png">
-  <img alt="Wazplay" src="public/branding/dark-logo-github.png" width="480">
+  <source media="(prefers-color-scheme: dark)" srcset="public/branding/icon-circle-light.png">
+  <source media="(prefers-color-scheme: light)" srcset="public/branding/icon-circle-dark.png">
+  <img alt="Wazplay" src="public/branding/icon-circle-dark.png" width="220">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="public/branding/wordmark-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="public/branding/wordmark-light.png">
+  <img alt="Wazplay" src="public/branding/wordmark-light.png" width="220">
 </picture>
 
 ### A high-performance, browser-native video editor powered by WebAssembly and Rust.
