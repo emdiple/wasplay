@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useEditorStore } from '../../store/editorStore'
 import { formatTime } from '../../lib/format'
 import { cssVar } from '../../lib/themeColors'
 import {
   LUFS_TARGETS,
-  DEFAULT_TARGET_LUFS,
   GAIN_MIN_DB,
   GAIN_MAX_DB,
   clampGainDb,
@@ -20,12 +19,18 @@ import type { MediaInfo, Source } from '../../types'
 /**
  * The per-source detail sections (codec, loudness, waveform, thumbnails),
  * shared by the desktop Inspector and the mobile Analyzer modal.
+ *
+ * `context` avoids a redundant second gain control: in the clip Inspector the
+ * per-clip Audio group already owns the level (and shows the LUFS), so the
+ * source-level Loudness *control* is hidden there; it only appears in the
+ * source-only view (a staged bin item / the analyzer), where there's no clip to
+ * edit and this is where you set the level clips inherit.
  */
-export function SourceSections({ src }: { src: Source }) {
+export function SourceSections({ src, context = 'source' }: { src: Source; context?: 'clip' | 'source' }) {
   return (
     <>
       {src.info && <CodecBadges info={src.info} />}
-      <Loudness src={src} key={src.id} />
+      {context === 'source' && <Loudness src={src} key={src.id} />}
       {src.peaks && <Waveform peaks={src.peaks} gainDb={src.gainDb} />}
       {src.thumbs && src.thumbs.length > 0 && <ThumbnailStrip src={src} />}
     </>
@@ -70,7 +75,9 @@ function Loudness({ src }: { src: Source }) {
   const setClipGain = useEditorStore((s) => s.setClipGain)
   const snapshot = useEditorStore((s) => s.snapshot)
   const clipCount = useEditorStore((s) => s.audioClips.reduce((n, c) => (c.sourceId === src.id ? n + 1 : n), 0))
-  const [target, setTarget] = useState(DEFAULT_TARGET_LUFS)
+  // Shared, persisted normalize target (same one the clip Audio control uses).
+  const target = useEditorStore((s) => s.audioTargetLufs)
+  const setTarget = useEditorStore((s) => s.setAudioTargetLufs)
 
   const lufs = src.lufs
   const measured = hasMeasuredLoudness(lufs)
@@ -147,7 +154,10 @@ function Loudness({ src }: { src: Source }) {
       <div className="gain-actions">
         <label className="gain-target">
           Normalize to
-          <select value={target} onChange={(e) => setTarget(parseFloat(e.target.value))}>
+          <select value={String(target)} onChange={(e) => setTarget(parseFloat(e.target.value))}>
+            {!LUFS_TARGETS.some((t) => t.value === target) && (
+              <option value={target}>{`Custom (${target} LUFS)`}</option>
+            )}
             {LUFS_TARGETS.map((t) => (
               <option key={t.value} value={t.value}>
                 {t.label}

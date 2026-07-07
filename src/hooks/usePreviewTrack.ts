@@ -35,8 +35,11 @@ export function usePreviewTrack(
   localTime: number,
   muted: boolean,
   gainDb: number,
+  /** Fade envelope multiplier in [0,1] at the current playhead (1 = no fade). */
+  fadeMul = 1,
 ) {
   const lastSourceId = useRef<string | null>(null)
+  const volume = gainToVolume(gainDb) * fadeMul
 
   // Apply mute state directly on the element (JSX `muted` is unreliable).
   useEffect(() => {
@@ -44,12 +47,13 @@ export function usePreviewTrack(
     if (media) media.muted = muted
   }, [muted, mediaRef])
 
-  // Reflect the clip's output gain as preview volume, so lowering a clip's level
-  // is immediately audible here (updates live even while paused).
+  // Reflect the clip's output gain (and any fade envelope at the current
+  // playhead) as preview volume, so level changes and fades are immediately
+  // audible here — updating live even while paused/scrubbing.
   useEffect(() => {
     const media = mediaRef.current
-    if (media) media.volume = gainToVolume(gainDb)
-  }, [gainDb, mediaRef])
+    if (media) media.volume = volume
+  }, [volume, mediaRef])
 
   // Swap source when the active clip's underlying file changes.
   useEffect(() => {
@@ -67,7 +71,7 @@ export function usePreviewTrack(
       media.src = getObjectUrl(source.id, source.file)
       media.currentTime = localTime
       media.muted = muted // ensure the freshly-set src honours the current mute state
-      media.volume = gainToVolume(gainDb) // …and the current level
+      media.volume = volume // …and the current level (incl. fade)
       lastSourceId.current = source.id
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

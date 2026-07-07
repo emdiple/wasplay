@@ -7,11 +7,12 @@
 import { Muxer as Mp4Muxer, ArrayBufferTarget as Mp4Target } from 'mp4-muxer'
 import { Muxer as WebmMuxer, ArrayBufferTarget as WebmTarget } from 'webm-muxer'
 import { pickCodecs, even, type ExportCodecPlan } from './codecs'
-import { renderVideo } from './renderVideo'
+import { renderVideo, type TransByClip } from './renderVideo'
 import { renderAudio } from './renderAudio'
 import { useEditorStore } from '../store/editorStore'
+import { fromSpan, clipSpan } from '../lib/transition'
 import type { EdlResult } from '../wasm/wazEdl'
-import type { Source } from '../types'
+import type { Clip, Source } from '../types'
 
 const SAMPLE_RATE = 48000
 const CHANNELS = 2
@@ -83,6 +84,49 @@ export async function exportProject({ edl, sources, onStage, onProgress, signal 
   const plan = await pickCodecs(width, height, fps, hasAudio, SAMPLE_RATE, CHANNELS)
   const { muxer, target } = createMuxer(plan, width, height, fps)
 
+  // Per-clip effects live on the store clips (both tracks); join by clip id, the
+  // same side-map pattern as gainByClip — effects don't round-trip through the EDL.
+  const st = useEditorStore.getState()
+
+  // Plain fade envelopes (video renderer applies these outside dissolve windows).
+  const fadesByClip = new Map(
+    [...st.videoClips, ...st.audioClips]
+      .filter((c) => c.fadeIn || c.fadeOut)
+      .map((c) => [c.id, { fadeIn: c.fadeIn ?? 0, fadeOut: c.fadeOut ?? 0 }]),
+  )
+  // A dissolve is a same-layer construct: resolve each incoming clip's outgoing
+  // partner within its own track only.
+  const laneFrom = (clips: Clip[], b: Clip): Clip | null => {
+    const lane = clips.filter((c) => c.trackId === b.trackId)
+    const fs = fromSpan(lane.map(clipSpan), clipSpan(b))
+    return (fs && lane.find((c) => c.id === fs.id)) || null
+  }
+  // Video dissolves, keyed by the incoming clip id (the video renderer blends).
+  const transByClip: TransByClip = new Map()
+  for (const b of st.videoClips) {
+    const d = b.transitionIn?.dur
+    if (!d) continue
+    const from = laneFrom(st.videoClips, b)
+    if (from) transByClip.set(b.id, { dur: d, fromClipId: from.id })
+  }
+  // Audio has no compositor, so a dissolve is expressed as effective fades: the
+  // incoming clip fades in over the overlap and the outgoing clip fades out over
+  // it — a linear crossfade the existing gain-ramp path renders unchanged.
+  const audioFadesByClip = new Map(
+    st.audioClips.map((c) => [c.id, { fadeIn: c.fadeIn ?? 0, fadeOut: c.fadeOut ?? 0 }]),
+  )
+  for (const b of st.audioClips) {
+    const d = b.transitionIn?.dur
+    if (!d) continue
+    const to = audioFadesByClip.get(b.id)!
+    to.fadeIn = Math.max(to.fadeIn, d)
+    const from = laneFrom(st.audioClips, b)
+    if (from) {
+      const f = audioFadesByClip.get(from.id)!
+      f.fadeOut = Math.max(f.fadeOut, d)
+    }
+  }
+
   let failure: Error | null = null
   const capture = (e: unknown) => {
     failure ??= e instanceof Error ? e : new Error(String(e))
@@ -111,6 +155,8 @@ export async function exportProject({ edl, sources, onStage, onProgress, signal 
     fps,
     totalDuration: total,
     encoder: videoEncoder,
+    fadesByClip,
+    transByClip,
     onProgress: (done, all) => onProgress?.((done / all) * (hasAudio ? 0.9 : 0.97)),
     signal,
   })
@@ -129,7 +175,7 @@ export async function exportProject({ edl, sources, onStage, onProgress, signal 
       bitrate: plan.audio.bitrate,
     })
     // Per-clip output levels live on the store's audio clips; join by clip id.
-    const gainByClip = new Map(useEditorStore.getState().audioClips.map((c) => [c.id, c.gainDb]))
+    const gainByClip = new Map(st.audioClips.map((c) => [c.id, c.gainDb]))
 
     onStage?.('audio')
     await renderAudio({
@@ -140,6 +186,7 @@ export async function exportProject({ edl, sources, onStage, onProgress, signal 
       channels: CHANNELS,
       encoder: audioEncoder,
       gainByClip,
+      fadesByClip: audioFadesByClip,
       signal,
     })
     if (failure) throw failure

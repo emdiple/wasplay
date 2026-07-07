@@ -15,6 +15,12 @@ export const LUFS_TARGETS: { label: string; value: number }[] = [
 
 export const DEFAULT_TARGET_LUFS = -14
 
+/** Sensible bounds for a user-set normalize target (LUFS). */
+export const TARGET_MIN_LUFS = -40
+export const TARGET_MAX_LUFS = -6
+export const clampTargetLufs = (v: number): number =>
+  Number.isFinite(v) ? Math.min(TARGET_MAX_LUFS, Math.max(TARGET_MIN_LUFS, v)) : DEFAULT_TARGET_LUFS
+
 /** Gain knob range, in dB. */
 export const GAIN_MIN_DB = -24
 export const GAIN_MAX_DB = 24

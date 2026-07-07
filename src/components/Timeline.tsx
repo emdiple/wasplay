@@ -7,14 +7,13 @@ import { domainSeconds, snapTime } from '../lib/timeline'
 import { Ruler } from './Ruler'
 import { Track } from './Track'
 import { Playhead } from './Playhead'
-import { ClipInspector, hasAudioSelection } from './ClipInspector'
+import { ClipInspector, hasClipSelection } from './ClipInspector'
+import type { TimelineTrack } from '../types'
 
-/** The bottom timeline: ruler, video + audio tracks, playhead, and marquee. */
+/** The bottom timeline: ruler, layer tracks, playhead, and marquee. */
 export function Timeline() {
   const { scrollRef, zoom } = useControls()
   const contentRef = useRef<HTMLDivElement>(null)
-  const videoRef = useRef<HTMLDivElement>(null)
-  const audioRef = useRef<HTMLDivElement>(null)
 
   // Two-finger pinch on the timeline = zoom (pxPerSec), anchored at the pinch
   // midpoint. Only touch pointers that aren't grabbing a clip or the ruler
@@ -63,13 +62,33 @@ export function Timeline() {
 
   const pxPerSec = useEditorStore((s) => s.pxPerSec)
   const totalSeconds = useEditorStore((s) => domainSeconds(s.videoClips, s.audioClips))
-  const showInspector = useEditorStore((s) => hasAudioSelection(s.selection, s.audioClips))
+  const showInspector = useEditorStore((s) => hasClipSelection(s.selection, s.videoClips, s.audioClips))
   const splitAtPlayhead = useEditorStore((s) => s.splitAtPlayhead)
+  const tracks = useEditorStore((s) => s.tracks)
+  const addTrack = useEditorStore((s) => s.addTrack)
+  const removeTrack = useEditorStore((s) => s.removeTrack)
   const compact = useMediaQuery(COMPACT_QUERY)
   const zoomLabel = (pxPerSec < 10 ? pxPerSec.toFixed(1) : Math.round(pxPerSec)) + ' px/s'
-  const { marqueeRect, beginMarquee } = useMarquee(contentRef, videoRef, audioRef)
+  const { marqueeRect, beginMarquee } = useMarquee(contentRef)
 
-  const handleDrop = (e: React.DragEvent) => {
+  // Row order mirrors pro NLEs: video layers top-down from the highest (V2 over
+  // V1), audio layers top-down from A1. Store order within a kind is V1→Vn.
+  const videoTracks = tracks.filter((t) => t.kind === 'video')
+  const audioTracks = tracks.filter((t) => t.kind === 'audio')
+  const rows: { track: TimelineTrack; label: string; removable: boolean }[] = [
+    ...[...videoTracks].reverse().map((t) => ({
+      track: t,
+      label: `V${videoTracks.indexOf(t) + 1}`,
+      removable: videoTracks.length > 1,
+    })),
+    ...audioTracks.map((t) => ({
+      track: t,
+      label: `A${audioTracks.indexOf(t) + 1}`,
+      removable: audioTracks.length > 1,
+    })),
+  ]
+
+  const handleDrop = (e: React.DragEvent, track: TimelineTrack) => {
     const id = e.dataTransfer.getData('text/waz-source')
     const store = useEditorStore.getState()
     const src = store.sources.find((s) => s.id === id)
@@ -79,13 +98,21 @@ export function Timeline() {
     if (!content) return
     const x = Math.max(0, e.clientX - content.getBoundingClientRect().left)
     const t = snapTime([...store.videoClips, ...store.audioClips], x / store.pxPerSec, store.pxPerSec, store.playheadTime)
-    store.placeSource(src.id, t)
+    // The dropped-on lane receives the matching half; the other half of an A/V
+    // source lands on the first lane of its kind.
+    store.placeSource(src.id, t, {
+      videoTrackId: track.kind === 'video' ? track.id : undefined,
+      audioTrackId: track.kind === 'audio' ? track.id : undefined,
+    })
     store.setStage(src.id)
     zoom.fitTimeline()
   }
 
   return (
-    <section className="timeline">
+    <section
+      className="timeline"
+      style={{ '--vtracks': videoTracks.length, '--atracks': audioTracks.length } as React.CSSProperties}
+    >
       <div className="tl-bar">
         {compact ? (
           // Mobile: the per-clip audio strip lives here (no room for a side panel).
@@ -101,6 +128,12 @@ export function Timeline() {
             <div className="toolbar-group">
               <button className="btn icon" title="Split at playhead (S)" onClick={splitAtPlayhead}>
                 ⑂ <span className="btn-label">Split</span>
+              </button>
+              <button className="btn icon" title="Add video track" onClick={() => addTrack('video')}>
+                ＋V
+              </button>
+              <button className="btn icon" title="Add audio track" onClick={() => addTrack('audio')}>
+                ＋A
               </button>
             </div>
             <span className="hint">
@@ -123,8 +156,20 @@ export function Timeline() {
       <div className="tl-body">
         <div className="gutter">
           <div className="g-ruler" />
-          <div className="g-lab g-v">V</div>
-          <div className="g-lab g-a">A</div>
+          {rows.map(({ track, label, removable }) => (
+            <div className={`g-lab g-${track.kind === 'video' ? 'v' : 'a'}`} key={track.id}>
+              <span>{label}</span>
+              {removable && (
+                <button
+                  className="g-remove"
+                  title={`Remove ${label} (and its clips)`}
+                  onClick={() => removeTrack(track.id)}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          ))}
         </div>
         <div
           className="tl-scroll"
@@ -136,8 +181,9 @@ export function Timeline() {
         >
           <div className="tl-content" ref={contentRef} style={{ width: totalSeconds * pxPerSec }}>
             <Ruler />
-            <Track kind="video" trackRef={videoRef} onEmptyPointerDown={beginMarquee} onDrop={handleDrop} />
-            <Track kind="audio" trackRef={audioRef} onEmptyPointerDown={beginMarquee} onDrop={handleDrop} />
+            {rows.map(({ track }) => (
+              <Track key={track.id} track={track} onEmptyPointerDown={beginMarquee} onDrop={handleDrop} />
+            ))}
             <Playhead />
             {marqueeRect && <div className="marquee" style={marqueeRect} />}
           </div>

@@ -36,17 +36,28 @@ export interface Project {
   audio_clips: ProjectClip[]
 }
 
+/**
+ * Layer separation in the flattened z passed to the EDL/compositor. Track
+ * priority dominates within-track stacking, so a clip on V2 always composites
+ * above anything on V1 regardless of their per-clip z values.
+ */
+const Z_BAND = 1_000_000
+
 /** Build a project snapshot from the current store state. */
 export function serializeProject(fps = EXPORT_FPS): Project {
   const s = useEditorStore.getState()
-  const clip = (c: (typeof s.videoClips)[number]): ProjectClip => ({
+  // The EDL shape has no track concept — layers are flattened into z bands:
+  // effective z = videoTrackIndex * Z_BAND + clip z. Audio needs no banding
+  // (every audio event mixes regardless of order).
+  const videoOrder = s.tracks.filter((t) => t.kind === 'video').map((t) => t.id)
+  const clip = (c: (typeof s.videoClips)[number], band = 0): ProjectClip => ({
     id: c.id,
     source_id: c.sourceId,
     link: c.link,
     start_s: c.start,
     in_s: c.in,
     dur_s: c.dur,
-    z: c.z,
+    z: band * Z_BAND + c.z,
   })
   return {
     fps,
@@ -59,7 +70,7 @@ export function serializeProject(fps = EXPORT_FPS): Project {
       has_audio: src.hasAudio,
       is_video: src.isVideo,
     })),
-    video_clips: s.videoClips.map(clip),
-    audio_clips: s.audioClips.map(clip),
+    video_clips: s.videoClips.map((c) => clip(c, Math.max(0, videoOrder.indexOf(c.trackId)))),
+    audio_clips: s.audioClips.map((c) => clip(c)),
   }
 }
