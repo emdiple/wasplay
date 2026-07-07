@@ -14,12 +14,10 @@ export interface MarqueeRect {
 /**
  * Rubber-band selection over empty timeline space. Returns the current marquee
  * rectangle (for rendering) and a `beginMarquee` handler to start a drag.
+ * Lane bands are read from the rendered `.track[data-track-id]` rows, so any
+ * number of layers participates without extra wiring.
  */
-export function useMarquee(
-  contentRef: RefObject<HTMLDivElement | null>,
-  videoRef: RefObject<HTMLDivElement | null>,
-  audioRef: RefObject<HTMLDivElement | null>,
-) {
+export function useMarquee(contentRef: RefObject<HTMLDivElement | null>) {
   const [rect, setRect] = useState<MarqueeRect | null>(null)
   const baseRef = useRef<Set<string>>(new Set())
 
@@ -28,12 +26,16 @@ export function useMarquee(
     const t1 = l / pxPerSec
     const t2 = r / pxPerSec
     const hit = new Set<string>()
+    const all = [...videoClips, ...audioClips]
+    const rows = contentRef.current?.querySelectorAll<HTMLElement>('.track[data-track-id]') ?? []
     const bands: { clips: Clip[]; top: number; bot: number }[] = []
-    if (videoRef.current) {
-      bands.push({ clips: videoClips, top: videoRef.current.offsetTop, bot: videoRef.current.offsetTop + videoRef.current.offsetHeight })
-    }
-    if (audioRef.current) {
-      bands.push({ clips: audioClips, top: audioRef.current.offsetTop, bot: audioRef.current.offsetTop + audioRef.current.offsetHeight })
+    for (const row of rows) {
+      const id = row.dataset.trackId!
+      bands.push({
+        clips: all.filter((c) => c.trackId === id),
+        top: row.offsetTop,
+        bot: row.offsetTop + row.offsetHeight,
+      })
     }
     for (const band of bands) {
       if (b < band.top || t > band.bot) continue // no vertical overlap

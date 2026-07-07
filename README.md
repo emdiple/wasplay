@@ -6,10 +6,9 @@
   <img alt="Wazplay" src="public/branding/dark-logo-github.png" width="480">
 </picture>
 
-### A professional-grade video editor that runs entirely in your browser
+### A high-performance, browser-native video editor powered by WebAssembly and Rust.
 
-**No installs. No plugins. No FFmpeg. No cloud, no accounts, no uploads.** Just
-open a tab and edit — powered by Rust compiled to WebAssembly.
+**Zero installation. Zero server-side dependencies. Zero data tracking.** Edit high-resolution video instantly in a single browser tab. By leveraging Rust compiled to WebAssembly, all rendering and processing happen entirely client-side—eliminating the need for cloud uploads, external plugins, or native FFmpeg binaries.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js >= 20](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](package.json)
@@ -23,6 +22,18 @@ open a tab and edit — powered by Rust compiled to WebAssembly.
 </div>
 
 ---
+
+## Table of contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Using the editor](#using-the-editor)
+- [Browser support](#browser-support)
+- [Architecture](#architecture)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Overview
 
@@ -43,21 +54,25 @@ for **hardware-accelerated export with no native dependencies**.
 
 > **Project status — active development.** Editing, analysis, and export are
 > functional end-to-end, including a live program monitor that follows the
-> playhead and a hardware-accelerated render pipeline. The timeline is currently
-> single-layer (one video + one audio track); multi-track compositing, effects,
-> and a fully WYSIWYG preview are on the [Roadmap](#roadmap).
+> playhead and a hardware-accelerated render pipeline. Per-clip **fades and
+> cross-dissolves** preview live and render on export, and the timeline is
+> **multi-layer** (add/remove video and audio tracks; higher video layers
+> composite on top). A broader effects set and a single unified WYSIWYG
+> compositor are on the [Roadmap](#roadmap).
 
 ## Features
 
 - **100% client-side, no native dependencies** — no uploads, no backend, no transcoding server, **no native install and no FFmpeg to set up**; works offline once loaded.
 - **Handles huge files** — a streaming Rust/WASM core keeps **memory flat whether the source is 10 MB or 10 GB**, so multi-gigabyte clips import without exhausting the tab.
 - **Multi-format import** — drag in multiple audio/video files at once; each source gets a colour shared by its linked video and audio clips.
-- **Non-linear timeline** — single-layer (one video track, one audio track) editing: drag-to-arrange with snapping, marquee multi-select, a playhead-anchored razor that cuts linked A/V together, and zoom-to-fit on a timeline that scales to long media.
-- **Broadcast-grade audio analysis** — per-source panel with container/codec info, **integrated loudness (EBU R128 / LUFS) with gain-to-target**, decoded waveforms, and keyframe thumbnails, all reusing the same decoded data as the timeline. Per-source and per-clip gain (dB) driven by real LUFS measurement.
+- **Non-linear, multi-layer timeline** — add/remove video and audio tracks (V2 composites above V1; every audio layer mixes on export): drag-to-arrange with snapping and vertical moves between layers, marquee multi-select, a playhead-anchored razor that cuts linked A/V together, and zoom-to-fit on a timeline that scales to long media.
+- **Fades & cross-dissolves** — per-clip fade-in/out (picture to black, sound to silence) and explicit cross-dissolves between adjacent clips, added from the clip menu or Inspector. Both **preview live** in the program monitor (layered video + audio ramps) and render identically on export.
+- **Broadcast-grade audio analysis** — per-source panel with container/codec info, **integrated loudness (EBU R128 / LUFS) with gain-to-target**, decoded waveforms, and keyframe thumbnails, all reusing the same decoded data as the timeline. Per-source and per-clip gain (dB) driven by real LUFS measurement, with a **user-editable normalize target** stored as an app default.
+- **Pro-style Inspector** — a context-aware properties panel with a clip identity header and collapsible groups (Info, Fades, Transition, Audio), mirroring the layout of desktop NLE inspectors.
 - **Real export, in the browser, two ways:**
-  - **Render** the timeline to a downloadable **MP4** (H.264 / AAC) or **WebM** (VP9 or VP8 / Opus) entirely in-browser via the **hardware-accelerated WebCodecs API**, muxed on the client, with a native save-location picker where supported.
+  - **Render** the timeline to a downloadable **MP4** (AV1 or HEVC where hardware-encoded, else H.264 / AAC) or **WebM** (AV1, VP9 or VP8 / Opus) entirely in-browser via the **hardware-accelerated WebCodecs API**, muxed on the client, with a native save-location picker where supported.
   - **Frame-accurate EDL export** — a JSON edit list plus a best-effort FFmpeg `filter_complex` command, for finishing in external tools.
-- **Session persistence** — projects survive reloads (IndexedDB + `localStorage`); resizable, responsive workspace panels.
+- **Session persistence** — the whole project (media, layers, clips, effects, editing defaults) survives reloads via IndexedDB + `localStorage`; resizable, responsive workspace panels; 100-level undo/redo.
 
 ## Quick start
 
@@ -87,6 +102,40 @@ part" step to remember.
 | `npm run typecheck` | `tsc --noEmit` only |
 | `cargo test --workspace` | Rust test suite for all crates |
 
+## Using the editor
+
+**Workflow:** drag media into the bin → drop it on a timeline layer → arrange,
+cut, and layer clips → add fades/dissolves from the clip's right-click menu or
+the Inspector → adjust levels (or Normalize to a LUFS target) → Export.
+
+- **Layers** — add tracks with the **＋V / ＋A** toolbar buttons; remove one via
+  the **✕** on its gutter label (hover). Drag clips **vertically** to move them
+  between layers of the same kind; higher video layers composite on top.
+- **Fades** — select a clip and set Fade In / Fade Out (seconds) in the
+  Inspector; picture fades from/to black, audio ramps from/to silence.
+- **Cross-dissolve** — right-click the *second* of two adjacent clips → **Add
+  dissolve** (or use the Inspector's Transition group). The incoming group
+  ripple-slides onto the previous clip so real frames overlap; tune the length
+  in the Inspector.
+- **Loudness** — the Inspector's Audio group shows measured LUFS per source;
+  **Normalize** sets each selected clip's gain to reach the target, and the
+  target itself is editable (stored as an app default).
+
+### Keyboard shortcuts
+
+| Key | Action |
+| --- | --- |
+| <kbd>Space</kbd> | Play / pause |
+| <kbd>←</kbd> / <kbd>→</kbd> | Step one frame |
+| <kbd>Home</kbd> / <kbd>End</kbd> | Jump to start / end |
+| <kbd>V</kbd> | Select tool |
+| <kbd>C</kbd> | Razor (cut) tool |
+| <kbd>S</kbd> | Split at playhead |
+| <kbd>Delete</kbd> / <kbd>Backspace</kbd> | Delete selection |
+| <kbd>⌘/Ctrl</kbd>+<kbd>Z</kbd> | Undo |
+| <kbd>⌘</kbd>+<kbd>⇧</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> | Redo |
+| <kbd>⇧</kbd>+click / marquee | Additive select |
+
 ## Browser support
 
 Wazplay leans on modern web-platform APIs, so it runs best in **Chromium-based
@@ -108,6 +157,10 @@ no pure-JS fallback.
 
 ## Architecture
 
+> Looking for the deeper design rationale? [docs/DESIGN.md](docs/DESIGN.md)
+> records how each subsystem is handled — strategy, file map, trade-offs, and
+> future direction, one section per concern.
+
 The heavy media work is split into small, single-purpose Rust crates compiled
 to WASM, so the React frontend pulls in only what it needs. Each crate offers
 both whole-buffer entry points (for small files and tests) and **streaming**
@@ -118,7 +171,7 @@ fully loaded into memory.
 | --- | --- |
 | [`waz-stinger-wasm`](crates/waz-stinger-wasm) | Media probe + loudness (EBU R128 / LUFS) |
 | [`waz-wave-wasm`](crates/waz-wave-wasm) | Waveform peak extraction |
-| [`waz-strip-wasm`](crates/waz-strip-wasm) | MP4 keyframe scanner (no video decode) |
+| [`waz-strip-wasm`](crates/waz-strip-wasm) | MP4/MOV keyframe scanner (no video decode) |
 | [`waz-edl-wasm`](crates/waz-edl-wasm) | Stateless EDL / timeline export engine |
 
 **Streaming core.** Rather than load a file into an `ArrayBuffer` (which can
@@ -142,8 +195,9 @@ scripts/build-wasm.mjs   Rust → WASM build step (output in src/wasm/pkg/, giti
 
 ## Roadmap
 
-- **Multi-track timeline** — more than one video/audio layer, with the live preview rendered through the same compositor as export for a fully WYSIWYG program monitor.
-- **Transitions & effects** — cross-dissolves, speed changes, filters, keyframable properties.
+- **Unified WYSIWYG compositor** — route the live preview through the same compositor as export (letterboxing, stacked layers, effects) instead of today's layered `<video>` approximation; includes mixing *every* audio layer in preview (export already mixes all; preview plays the topmost audible lane).
+- **More transitions & effects** — building on the shipped fades and cross-dissolves: wipes, speed changes, colour/filters, and keyframable properties (likely on a shared GPU compositor as the effect set grows).
+- **Text overlays / titles** — styled, animatable text as an overlay layer on the compositor above.
 - **Worker-based render orchestration** — the decode/encode already run on hardware (WebCodecs) via a demux + `VideoDecoder` fast path; moving the render *loop* itself into a Worker would keep the UI fully responsive on long exports.
 
 ## Contributing

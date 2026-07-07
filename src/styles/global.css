@@ -413,65 +413,173 @@ button.btn.icon {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
 .inspector-empty {
   color: var(--dim);
   font-size: 12px;
   line-height: 1.7;
-  padding: 24px 8px;
+  padding: 40px 22px;
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin: auto 0;
 }
-.insp-section .panel-label {
-  margin-bottom: 8px;
+.inspector-empty-icon {
+  font-size: 26px;
+  color: var(--dim-2);
+  opacity: 0.7;
 }
-.insp-clip-head {
+.inspector-empty p {
+  max-width: 220px;
+  margin: 0;
+}
+
+/* ── Clip identity header ── */
+.insp-clip-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 10px;
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--border);
 }
 .insp-swatch {
-  width: 5px;
-  height: 22px;
+  width: 4px;
+  align-self: stretch;
+  min-height: 30px;
   border-radius: 999px;
   flex: 0 0 auto;
 }
+.insp-clip-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
 .insp-clip-name {
-  font-weight: 550;
-  color: var(--text-mid);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-strong);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.insp-linked {
+  font-size: 10px;
+  flex: 0 0 auto;
+}
+.insp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.insp-chip {
+  font-size: 10px;
+  font-weight: 550;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  color: var(--text-mid);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Collapsible property groups + static source panels share one rhythm ── */
+.insp-group,
+.inspector .panel {
+  border-bottom: 1px solid var(--border);
+}
+.insp-group-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.insp-group-head:hover {
+  background: var(--surface-hover);
+}
+.insp-chevron {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  color: var(--dim-2);
+  transition: transform 0.12s ease;
+}
+.insp-group.open .insp-chevron {
+  transform: rotate(90deg);
+}
+.insp-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-mid);
+}
+.insp-group-hint {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--dim);
+}
+.insp-group-right {
+  margin-left: auto;
+  display: flex;
+}
+.insp-group-body {
+  padding: 2px 14px 14px;
+}
+
+/* Info read-out: label left, value right, hairline-separated rows. */
 .insp-rows {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px 12px;
+  display: flex;
+  flex-direction: column;
 }
 .insp-row {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+.insp-row:last-child {
+  border-bottom: none;
 }
 .insp-k {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: 11px;
   color: var(--dim);
 }
 .insp-v {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-strong);
 }
-/* The inspector hosts panels edge-to-edge; drop the modal-only side padding. */
+
+/* Source-detail panels render like groups inside the inspector (no card chrome). */
 .inspector .panel {
-  padding: 14px;
+  padding: 12px 14px 14px;
+  background: none;
+  border-radius: 0;
+}
+.inspector .panel > .panel-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-mid);
+  margin-bottom: 10px;
 }
 .inspector .metrics {
   gap: 16px;
@@ -752,11 +860,20 @@ body.resizing-y * {
   position: relative;
 }
 .program-video {
+  /* Absolutely centred so the dissolve's two layers overlap exactly; an intrinsic
+     max-sized element with inset:0 + margin:auto centres both axes. */
+  position: absolute;
+  inset: 0;
+  margin: auto;
   max-width: 100%;
   max-height: 100%;
   background: var(--video-bg);
   border-radius: var(--radius-l);
   box-shadow: 0 0 0 1px var(--border-2), var(--shadow-2);
+}
+/* The background (outgoing) dissolve layer sits under the foreground one. */
+.program-video.under {
+  box-shadow: none;
 }
 .program-blank {
   width: 100%;
@@ -765,6 +882,14 @@ body.resizing-y * {
   background: var(--video-bg);
   border-radius: 6px;
   box-shadow: 0 0 0 1px var(--border-2);
+}
+/* Fade-to-black overlay for the previewed clip's fade-in/out (opacity set inline). */
+.program-fade {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  border-radius: var(--radius-l);
+  pointer-events: none;
 }
 /* ── Transport bar (under the preview) ───────────────────── */
 .transport-bar {
@@ -866,7 +991,8 @@ body.resizing-y * {
 
 .tl-body {
   display: flex;
-  height: calc(var(--ruler-h) + var(--vtrack-h) + var(--atrack-h));
+  /* --vtracks/--atracks are set inline by the Timeline from the layer counts. */
+  height: calc(var(--ruler-h) + var(--vtrack-h) * var(--vtracks, 1) + var(--atrack-h) * var(--atracks, 1));
 }
 
 /* left gutter with track labels (does not scroll) */
@@ -880,6 +1006,7 @@ body.resizing-y * {
   border-bottom: 1px solid var(--border);
 }
 .gutter .g-lab {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -894,6 +1021,32 @@ body.resizing-y * {
 }
 .gutter .g-a {
   height: var(--atrack-h);
+}
+/* Layer remove button — appears on hover over the gutter label. */
+.gutter .g-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  line-height: 1;
+  color: var(--dim);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.gutter .g-lab:hover .g-remove {
+  display: flex;
+}
+.gutter .g-remove:hover {
+  color: var(--text-strong);
+  border-color: var(--border-2);
 }
 
 .tl-scroll {
@@ -1066,7 +1219,7 @@ body.resizing-y * {
   top: 0;
   width: 0;
   pointer-events: none;
-  height: calc(var(--ruler-h) + var(--vtrack-h) + var(--atrack-h));
+  height: calc(var(--ruler-h) + var(--vtrack-h) * var(--vtracks, 1) + var(--atrack-h) * var(--atracks, 1));
   border-left: 1px solid var(--playhead);
   z-index: 10;
 }
@@ -1511,18 +1664,19 @@ body.resizing-y * {
 .audio-level .ci-unit {
   color: var(--dim);
 }
-.audio-level .ci-target {
+.audio-level .al-target {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
 }
-.audio-level.strip .ci-target {
-  margin-left: 4px;
+.audio-level .al-target-cap {
+  font-size: 11px;
+  color: var(--dim);
 }
-.audio-level.stack .al-actions .btn:last-child {
-  margin-left: auto;
+.audio-level .al-target-num {
+  width: 52px;
 }
-.audio-level .ci-target select {
+.audio-level .al-target-preset {
   padding: 3px 5px;
   font-size: 11px;
   background: var(--canvas-bg);
@@ -1531,8 +1685,30 @@ body.resizing-y * {
   border-radius: 5px;
   cursor: pointer;
 }
+.audio-level .al-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Inspector (stack): target row on top, full-width buttons below. */
+.audio-level.stack .al-actions {
+  flex-direction: column;
+  align-items: stretch;
+}
+.audio-level.stack .al-target {
+  flex-wrap: wrap;
+}
+.audio-level.stack .al-target-preset {
+  margin-left: auto;
+}
+.audio-level.stack .al-buttons .btn {
+  flex: 1 1 auto;
+}
+.audio-level.strip .al-target {
+  margin-left: 4px;
+}
 .audio-level .btn {
-  padding: 3px 8px;
+  padding: 4px 8px;
   font-size: 12px;
 }
 .audio-level .ci-badge {
@@ -1542,6 +1718,123 @@ body.resizing-y * {
   border: 1px solid var(--border);
   color: var(--text-mid);
   font-variant-numeric: tabular-nums;
+}
+
+/* Inspector dissolve control (shares cf-* / ci-* field styling). */
+.clip-dissolve {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--dim);
+}
+.clip-dissolve .cf-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.clip-dissolve .cf-label {
+  color: var(--text-mid);
+  white-space: nowrap;
+  flex: 0 0 58px;
+}
+.clip-dissolve .ci-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.clip-dissolve .ci-number {
+  width: 58px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  background: var(--canvas-bg);
+  color: var(--text-strong);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.clip-dissolve .cd-remove {
+  align-self: flex-start;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+/* Timeline overlay marking a clip's incoming dissolve (its first `dur` seconds). */
+.clip-transition {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  border-right: 1px dashed var(--text-strong);
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--text-strong) 26%, transparent) 0,
+    color-mix(in srgb, var(--text-strong) 26%, transparent) 2px,
+    transparent 2px,
+    transparent 7px
+  );
+}
+
+/* Per-clip fade-in / fade-out control (shares ci-* field styling with audio-level). */
+.clip-fades {
+  font-size: 11px;
+  color: var(--dim);
+}
+.clip-fades.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.clip-fades.strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+.clip-fades .cf-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.clip-fades.stack .cf-field {
+  width: 100%;
+}
+.clip-fades.strip .cf-field {
+  flex: 1 1 auto;
+}
+.clip-fades .ci-icon {
+  font-size: 12px;
+  color: var(--dim-2);
+}
+.clip-fades .cf-label {
+  color: var(--text-mid);
+  white-space: nowrap;
+}
+.clip-fades.stack .cf-label {
+  flex: 0 0 58px;
+}
+.clip-fades .ci-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.clip-fades .ci-number {
+  width: 58px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  background: var(--canvas-bg);
+  color: var(--text-strong);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.clip-fades .ci-unit {
+  color: var(--dim);
 }
 
 .analyzer-wave {
@@ -1753,7 +2046,7 @@ body.resizing-y * {
   .tl-bar .hint {
     display: none;
   }
-  .tl-bar:not(:has(.audio-level)) {
+  .tl-bar:not(:has(.audio-level, .clip-fades)) {
     display: none;
   }
   .tl-bar {
@@ -1773,6 +2066,14 @@ body.resizing-y * {
   .audio-level.strip .ci-slider {
     min-width: 110px;
     max-width: 150px;
+  }
+  .clip-fades.strip {
+    width: max-content;
+    min-width: 100%;
+  }
+  .clip-fades.strip .ci-slider {
+    min-width: 90px;
+    max-width: 130px;
   }
 
   /* Modals fill the phone screen comfortably. */
@@ -1816,7 +2117,7 @@ body.resizing-y * {
    to fill — no cap, so there's no dead band between it and the timeline. ── */
 @media (max-width: 600px) and (orientation: portrait) {
   .tl-body {
-    /* slightly shorter tracks so the ruler + both tracks fit the narrow width */
-    height: calc(var(--ruler-h) + 84px + 58px);
+    /* slightly shorter tracks so the ruler + the layer rows fit the narrow width */
+    height: calc(var(--ruler-h) + 84px * var(--vtracks, 1) + 58px * var(--atracks, 1));
   }
 }

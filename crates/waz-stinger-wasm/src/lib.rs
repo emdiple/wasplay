@@ -54,7 +54,9 @@ pub fn measure_lufs_from_bytes(audio_bytes: &[u8]) -> Result<f64, JsValue> {
 #[wasm_bindgen]
 pub fn get_media_info_streaming(read_fn: js_sys::Function, file_len: f64) -> Result<String, JsValue> {
     let len = file_len as u64;
-    let header = read_prefix(&read_fn, len.min(16)).map_err(|e| JsValue::from_str(&e))?;
+    // 64 bytes: enough for every magic-byte check, including the EBML DocType
+    // ("webm" vs "matroska") that sits a few dozen bytes into MKV/WebM files.
+    let header = read_prefix(&read_fn, len.min(64)).map_err(|e| JsValue::from_str(&e))?;
     let container = detect_container(&header);
     let src: Box<dyn MediaSource> = Box::new(JsReader::new(read_fn, len));
     media_info_from_source(container, src).map_err(|e| JsValue::from_str(&e.to_string()))
@@ -146,7 +148,20 @@ fn media_info_from_source(
 }
 
 fn detect_container(b: &[u8]) -> &'static str {
-    if b.len() >= 8  && &b[4..8] == b"ftyp"  { return "MP4"; }
+    if b.len() >= 12 && &b[4..8] == b"ftyp" {
+        // QuickTime brand distinguishes .mov from the MP4 family.
+        if &b[8..12] == b"qt  " { return "MOV"; }
+        return "MP4";
+    }
+    if b.len() >= 4 && b[0..4] == [0x1A, 0x45, 0xDF, 0xA3] {
+        // EBML header — Matroska family. The DocType string ("webm" or
+        // "matroska") appears within the first few dozen bytes.
+        let head = &b[..b.len().min(64)];
+        if head.windows(4).any(|w| w == b"webm") { return "WebM"; }
+        return "MKV";
+    }
+    if b.len() >= 12 && &b[0..4] == b"FORM" && &b[8..12] == b"AIFF" { return "AIFF"; }
+    if b.len() >= 4  && &b[0..4] == b"caff"  { return "CAF"; }
     if b.len() >= 4  && &b[0..4] == b"RIFF"  { return "WAV"; }
     if b.len() >= 4  && &b[0..4] == b"OggS"  { return "OGG"; }
     if b.len() >= 4  && &b[0..4] == b"fLaC"  { return "FLAC"; }
@@ -254,6 +269,24 @@ fn lufs_from_source(src: Box<dyn MediaSource>) -> Result<f64, Box<dyn std::error
 mod tests {
     use super::*;
     use std::f32::consts::PI;
+
+    #[test]
+    fn detect_container_matroska_family_and_mov() {
+        // EBML magic + DocType "webm" within the first 64 bytes → WebM.
+        let mut webm = vec![0x1A, 0x45, 0xDF, 0xA3];
+        webm.extend_from_slice(&[0u8; 20]);
+        webm.extend_from_slice(b"webm");
+        assert_eq!(detect_container(&webm), "WebM");
+
+        // EBML magic + "matroska" DocType → MKV.
+        let mut mkv = vec![0x1A, 0x45, 0xDF, 0xA3];
+        mkv.extend_from_slice(b"\x42\x82\x88matroska");
+        assert_eq!(detect_container(&mkv), "MKV");
+
+        // ftyp with QuickTime brand → MOV; any other brand → MP4.
+        assert_eq!(detect_container(b"\x00\x00\x00\x14ftypqt  \x00\x00\x00\x00"), "MOV");
+        assert_eq!(detect_container(b"\x00\x00\x00\x14ftypisom\x00\x00\x00\x00"), "MP4");
+    }
 
     fn sine_pcm(freq: f32, amp: f32, secs: f32, fs: u32) -> Vec<f32> {
         let n = (secs * fs as f32) as usize;

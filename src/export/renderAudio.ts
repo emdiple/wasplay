@@ -9,6 +9,8 @@
 import type { EdlEvent } from '../wasm/wazEdl'
 import type { Source } from '../types'
 import { dbToLinear } from '../lib/loudness'
+import { clampFades } from '../lib/fade'
+import type { FadesByClip } from './renderVideo'
 
 const ENCODE_CHUNK = 1024
 
@@ -21,6 +23,8 @@ export interface RenderAudioArgs {
   encoder: AudioEncoder
   /** Per-clip output gain (dB) keyed by clip id; missing → 0 dB (unity). */
   gainByClip?: Map<string, number>
+  /** Per-clip fade envelopes (seconds) keyed by clip id; missing → no fade. */
+  fadesByClip?: FadesByClip
   signal?: AbortSignal
 }
 
@@ -33,6 +37,7 @@ export async function renderAudio({
   channels,
   encoder,
   gainByClip,
+  fadesByClip,
   signal,
 }: RenderAudioArgs): Promise<void> {
   if (!events.length || totalDuration <= 0) {
@@ -64,7 +69,23 @@ export async function renderAudio({
     const buf = buffers.get(ev.source_id)
     if (!buf) continue
     const gain = ctx.createGain()
-    gain.gain.value = dbToLinear(gainByClip?.get(ev.clip_id) ?? 0)
+    const base = dbToLinear(gainByClip?.get(ev.clip_id) ?? 0)
+    const start = ev.timeline_in_s
+    const end = ev.timeline_out_s
+    const fade = fadesByClip?.get(ev.clip_id)
+    if (fade && (fade.fadeIn > 0 || fade.fadeOut > 0)) {
+      // Ramp the clip's base level up from silence over the fade-in and back down
+      // to silence over the fade-out. clampFades keeps the two from overlapping.
+      const { fadeIn: fin, fadeOut: fout } = clampFades(end - start, fade.fadeIn, fade.fadeOut)
+      gain.gain.setValueAtTime(fin > 0 ? 0 : base, start)
+      if (fin > 0) gain.gain.linearRampToValueAtTime(base, start + fin)
+      if (fout > 0) {
+        gain.gain.setValueAtTime(base, end - fout)
+        gain.gain.linearRampToValueAtTime(0, end)
+      }
+    } else {
+      gain.gain.value = base
+    }
     gain.connect(ctx.destination)
     const node = ctx.createBufferSource()
     node.buffer = buf

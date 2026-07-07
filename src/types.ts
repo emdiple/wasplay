@@ -100,6 +100,16 @@ export interface Source {
 }
 
 /**
+ * One timeline layer. The store holds an ordered list: within a kind, a later
+ * index means a higher layer number (V2 composites above V1; A2 mixes alongside
+ * A1). Every clip references the track it sits on via `trackId`.
+ */
+export interface TimelineTrack {
+  id: string
+  kind: TrackKind
+}
+
+/**
  * A clip placed on the timeline. A file's video and audio clips share a `link`
  * id so razor cuts keep the A/V pair in sync.
  */
@@ -107,6 +117,8 @@ export interface Clip {
   id: string
   sourceId: string
   link: string
+  /** The timeline track (layer) this clip sits on. */
+  trackId: string
   /** Timeline position of the clip's left edge, in seconds. */
   start: number
   /** In-point within the source, in seconds. */
@@ -121,6 +133,28 @@ export interface Clip {
    * independent. Only meaningful for audio clips.
    */
   gainDb: number
+  /**
+   * Fade-in duration in seconds, ramping from the clip's left edge. Video fades
+   * up from black; audio ramps up from silence. 0/undefined = no fade. Applies to
+   * both video and audio clips (a linked A/V pair fades picture and sound together).
+   */
+  fadeIn?: number
+  /** Fade-out duration in seconds, ramping to the clip's right edge (black / silence). */
+  fadeOut?: number
+  /**
+   * A transition crossfading the *preceding* clip into this one, occupying this
+   * clip's first `dur` seconds. Set on the incoming link group (video + audio).
+   * The overlap is created by repositioning (see the store's ripple logic), so
+   * this field always implies the clip actually overlaps its predecessor here.
+   */
+  transitionIn?: Transition
+}
+
+/** A clip-to-clip transition. Only a linear cross-dissolve for now. */
+export interface Transition {
+  kind: 'dissolve'
+  /** Length of the crossfade in seconds (= the overlap with the preceding clip). */
+  dur: number
 }
 
 export type Tool = 'select' | 'cut'

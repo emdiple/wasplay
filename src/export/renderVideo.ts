@@ -10,7 +10,26 @@
 
 import type { EdlEvent } from '../wasm/wazEdl'
 import { createFrameSource, type FrameSource } from './frameSource'
+import { fadeGain } from '../lib/fade'
 import type { Source } from '../types'
+
+/** Per-clip fade envelope (seconds) keyed by clip id; missing → no fade. */
+export type FadesByClip = Map<string, { fadeIn: number; fadeOut: number }>
+
+/**
+ * Dissolves keyed by the incoming clip's id. The outgoing clip is resolved by
+ * the caller (exportProject) against the store's tracks — a dissolve is a
+ * same-layer construct, and the EDL events carry no track info to re-derive it.
+ */
+export type TransByClip = Map<string, { dur: number; fromClipId: string }>
+
+/** A resolved cross-dissolve window: blend `from` → `to` across [start, end). */
+interface TransitionWindow {
+  from: EdlEvent
+  to: EdlEvent
+  start: number
+  end: number
+}
 
 /** The video event covering time `t`, topmost by z (events must be z-ascending). */
 function topmostAt(events: EdlEvent[], t: number): EdlEvent | null {
@@ -19,6 +38,18 @@ function topmostAt(events: EdlEvent[], t: number): EdlEvent | null {
     if (t >= ev.timeline_in_s && t < ev.timeline_out_s) hit = ev // later match = higher z
   }
   return hit
+}
+
+/** Pair each tagged incoming event with its outgoing event, by clip id. */
+function transitionWindows(events: EdlEvent[], transByClip: TransByClip): TransitionWindow[] {
+  const byId = new Map(events.map((e) => [e.clip_id, e]))
+  const out: TransitionWindow[] = []
+  for (const [toId, { dur, fromClipId }] of transByClip) {
+    const to = byId.get(toId)
+    const from = byId.get(fromClipId)
+    if (to && from && dur > 0) out.push({ from, to, start: to.timeline_in_s, end: to.timeline_in_s + dur })
+  }
+  return out
 }
 
 /** Draw an image into WxH preserving aspect ratio (letterbox/pillarbox). */
@@ -62,6 +93,10 @@ export interface RenderVideoArgs {
   fps: number
   totalDuration: number
   encoder: VideoEncoder
+  /** Per-clip fade envelopes (seconds); missing clip → no fade. */
+  fadesByClip?: FadesByClip
+  /** Per-clip dissolve lengths (seconds); drives the two-source crossfade blend. */
+  transByClip?: TransByClip
   onProgress?: (done: number, total: number) => void
   signal?: AbortSignal
 }
@@ -75,15 +110,32 @@ export async function renderVideo({
   fps,
   totalDuration,
   encoder,
+  fadesByClip,
+  transByClip,
   onProgress,
   signal,
 }: RenderVideoArgs): Promise<void> {
+  // topmostAt scans in array order — guarantee z-ascending whatever the EDL sent.
+  events = [...events].sort((a, b) => a.z - b.z)
   const frameSources = await loadFrameSources(events, sources)
   const canvas = new OffscreenCanvas(width, height)
   const ctx = canvas.getContext('2d')!
   const frameDur = 1_000_000 / fps
   const keyEvery = Math.max(1, Math.round(fps * 2))
   const totalFrames = Math.max(1, Math.round(totalDuration * fps))
+  const windows = transByClip ? transitionWindows(events, transByClip) : []
+
+  // Composite one event's frame onto the canvas at `alpha`, letterboxed.
+  const drawEvent = async (ev: EdlEvent, t: number, alpha: number) => {
+    const fs = frameSources.get(ev.source_id)
+    if (!fs || alpha <= 0) return
+    const img = await fs.getFrame(ev.source_in_s + (t - ev.timeline_in_s))
+    if (!img) return
+    const [iw, ih] = fs.dims()
+    ctx.globalAlpha = alpha
+    drawContain(ctx, img, iw, ih, width, height)
+    ctx.globalAlpha = 1
+  }
 
   try {
     for (let f = 0; f < totalFrames; f++) {
@@ -92,15 +144,27 @@ export async function renderVideo({
 
       ctx.fillStyle = '#000'
       ctx.fillRect(0, 0, width, height)
+
       const ev = topmostAt(events, t)
       if (ev) {
-        const fs = frameSources.get(ev.source_id)
-        if (fs) {
-          const img = await fs.getFrame(ev.source_in_s + (t - ev.timeline_in_s))
-          if (img) {
-            const [iw, ih] = fs.dims()
-            drawContain(ctx, img, iw, ih, width, height)
-          }
+        // A dissolve only shows when one of its two clips is what's on top —
+        // a clip on a higher layer covering this moment wins over the blend.
+        const win = windows.find(
+          (w) => t >= w.start && t < w.end && (w.to.clip_id === ev.clip_id || w.from.clip_id === ev.clip_id),
+        )
+        if (win) {
+          // Cross-dissolve: the outgoing clip is the backdrop, the incoming clip
+          // is drawn over it at rising alpha (fades from/to black don't apply here).
+          const p = (t - win.start) / (win.end - win.start)
+          await drawEvent(win.from, t, 1)
+          await drawEvent(win.to, t, p)
+        } else {
+          // Fade in/out toward the black background (globalAlpha=1 = no-op).
+          const fade = fadesByClip?.get(ev.clip_id)
+          const alpha = fade
+            ? fadeGain(t - ev.timeline_in_s, ev.timeline_out_s - ev.timeline_in_s, fade.fadeIn, fade.fadeOut)
+            : 1
+          await drawEvent(ev, t, alpha)
         }
       }
 

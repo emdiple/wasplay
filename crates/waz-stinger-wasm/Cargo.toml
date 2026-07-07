@@ -10,7 +10,12 @@ crate-type = ["cdylib", "rlib"]
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 ebur128 = "0.1"
+# all-codecs: aac, adpcm, alac, flac, mp1/mp2/mp3, pcm, vorbis
+# all-formats: isomp4 (mp4/mov/m4a), mkv (mkv/webm), ogg, wav, aiff, caf
+# Opus has no symphonia decoder — the frontend falls back to WebAudio decode
+# and routes the PCM through measure_lufs (see src/lib/decorate.ts).
 symphonia = { version = "0.6", default-features = false, features = [
-    "mp3", "aac", "flac", "vorbis", "pcm", "wav", "ogg", "isomp4",
+    "all-codecs",
+    "all-formats",
 ] }
 

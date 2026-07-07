@@ -17,7 +17,7 @@
 
 import { useEditorStore } from './editorStore'
 import { idbPutFile, idbGetFile, idbDeleteFile, idbKeys, idbClear } from '../lib/idb'
-import type { Clip, HSL, MediaInfo, Source } from '../types'
+import type { Clip, HSL, MediaInfo, Source, TimelineTrack } from '../types'
 
 const KEY = 'wazplay-project'
 const VERSION = 1
@@ -44,6 +44,8 @@ interface PersistedProject {
   sources: PersistedSource[]
   videoClips: Clip[]
   audioClips: Clip[]
+  /** Timeline layers; absent in pre-multitrack sessions (hydrate defaults them). */
+  tracks?: TimelineTrack[]
   pxPerSec: number
   playheadTime: number
   selectedSrcId: string | null
@@ -51,6 +53,7 @@ interface PersistedProject {
   trackScale: number
   inspectorW: number
   inspectorOpen: boolean
+  audioTargetLufs: number
 }
 
 /** Snapshot the persistable slice of the store to a JSON-safe project. */
@@ -73,6 +76,7 @@ function snapshot(): PersistedProject {
     })),
     videoClips: s.videoClips,
     audioClips: s.audioClips,
+    tracks: s.tracks,
     pxPerSec: s.pxPerSec,
     playheadTime: s.playheadTime,
     selectedSrcId: s.selectedSrcId,
@@ -80,6 +84,7 @@ function snapshot(): PersistedProject {
     trackScale: s.trackScale,
     inspectorW: s.inspectorW,
     inspectorOpen: s.inspectorOpen,
+    audioTargetLufs: s.audioTargetLufs,
   }
 }
 
@@ -167,6 +172,7 @@ export async function initPersistence(): Promise<void> {
         sources,
         videoClips: project.videoClips.filter(keepClip),
         audioClips: project.audioClips.filter(keepClip),
+        tracks: project.tracks,
         pxPerSec: project.pxPerSec,
         playheadTime: project.playheadTime,
         selectedSrcId: liveIds.has(project.selectedSrcId ?? '') ? project.selectedSrcId : (sources[0]?.id ?? null),
@@ -174,6 +180,7 @@ export async function initPersistence(): Promise<void> {
         trackScale: project.trackScale,
         inspectorW: project.inspectorW,
         inspectorOpen: project.inspectorOpen,
+        audioTargetLufs: project.audioTargetLufs,
       })
 
       // Re-derive peaks + thumbnails (never persisted); re-measure loudness only

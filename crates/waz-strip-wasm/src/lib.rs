@@ -4,7 +4,8 @@ use wasm_bindgen::JsCast;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
-/// Metadata about a single keyframe extracted from an MP4 container.
+/// Metadata about a single keyframe extracted from an MP4/MOV (ISO-BMFF /
+/// QuickTime) container.
 /// The caller receives this and feeds `data` into WebCodecs `VideoDecoder`.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KeyframeInfo {
@@ -66,7 +67,9 @@ pub struct SampleTable {
 
 // ── WASM exports ──────────────────────────────────────────────────────────────
 
-/// Scan an MP4 byte buffer and return codec configuration + keyframe locations.
+/// Scan an MP4/MOV byte buffer and return codec configuration + keyframe
+/// locations. QuickTime `.mov` shares the ISO-BMFF box structure, so the same
+/// walker covers both.
 ///
 /// JavaScript usage:
 /// ```js
@@ -201,7 +204,7 @@ fn find_moov(read_fn: &js_sys::Function, file_len: u64) -> Result<Vec<u8>, Strin
         }
         pos += box_size;
     }
-    Err("moov box not found — not a valid MP4?".to_string())
+    Err("moov box not found — not a valid MP4/MOV?".to_string())
 }
 
 /// Given a desired thumbnail count, select up to `count` keyframes evenly
@@ -307,7 +310,7 @@ impl<'a> Mp4Parser<'a> {
         }
 
         if self.keyframes.is_empty() {
-            return Err("no keyframes found — is this a valid MP4 with video?".to_string());
+            return Err("no keyframes found — is this a valid MP4/MOV with video?".to_string());
         }
 
         Ok(())
@@ -323,6 +326,15 @@ impl<'a> Mp4Parser<'a> {
             match &name {
                 b"mvhd" => { self.parse_mvhd(pos + 8)?; }
                 b"trak" => { self.parse_trak(pos + 8, box_end)?; }
+                // Old QuickTime files may zlib-compress the movie atom; we can't
+                // walk that without a decompressor, so fail with a clear message.
+                b"cmov" => {
+                    return Err(
+                        "compressed QuickTime movie header (cmov) is not supported — \
+                         re-save the file with a modern tool"
+                            .to_string(),
+                    );
+                }
                 _ => {}
             }
             pos = box_end;
@@ -665,6 +677,9 @@ fn parse_stts(data: &[u8], pos: usize, _end: usize) -> Result<Vec<(u32, u32)>, S
 fn parse_ctts(data: &[u8], pos: usize, _end: usize) -> Result<Vec<(u32, i64)>, String> {
     // version(1) + flags(3) + entry_count(4) + entries[(sample_count(4), offset(4))]
     // version 0 stores offset as u32; version 1 as i32. Read raw and reinterpret.
+    // QuickTime tolerance: .mov muxers write *signed* offsets even in version 0,
+    // so a raw value with the top bit set is a negative i32, not a ~2-billion-tick
+    // offset (which would be nonsensical). Same heuristic FFmpeg applies.
     let version = data.get(pos).copied().unwrap_or(0);
     let count = read_u32(data, pos + 4)? as usize;
     let base = pos + 8;
@@ -672,7 +687,11 @@ fn parse_ctts(data: &[u8], pos: usize, _end: usize) -> Result<Vec<(u32, i64)>, S
     for i in 0..count {
         let sample_count = read_u32(data, base + i * 8)?;
         let raw = read_u32(data, base + i * 8 + 4)?;
-        let offset = if version == 0 { raw as i64 } else { raw as i32 as i64 };
+        let offset = if version == 0 && raw < 0x8000_0000 {
+            raw as i64
+        } else {
+            raw as i32 as i64
+        };
         out.push((sample_count, offset));
     }
     Ok(out)
@@ -851,6 +870,28 @@ mod tests {
         // version 1 → offset is i32; 0xFFFFFFFF == -1
         let data = [1u8, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0xFF, 0xFF, 0xFF, 0xFF];
         assert_eq!(parse_ctts(&data, 0, data.len()).unwrap(), vec![(2, -1)]);
+    }
+
+    #[test]
+    fn parse_ctts_version0_quicktime_signed_tolerance() {
+        // QuickTime muxers write signed offsets even in version 0: a raw value
+        // with the top bit set is a negative i32, not a huge positive offset.
+        let data = [0u8, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0xFF, 0xFF, 0xFF, 0xFE];
+        assert_eq!(parse_ctts(&data, 0, data.len()).unwrap(), vec![(2, -2)]);
+    }
+
+    #[test]
+    fn compressed_moov_gives_clear_error() {
+        // moov containing only a cmov child → explicit "not supported" error,
+        // not a generic "no keyframes" one.
+        let mut b: Vec<u8> = Vec::new();
+        b.extend_from_slice(&24u32.to_be_bytes()); // moov box, 24 bytes total
+        b.extend_from_slice(b"moov");
+        b.extend_from_slice(&16u32.to_be_bytes()); // cmov child, 16 bytes
+        b.extend_from_slice(b"cmov");
+        b.extend_from_slice(&[0u8; 8]);
+        let err = scan_inner(&b).unwrap_err();
+        assert!(err.contains("cmov"), "unexpected error: {err}");
     }
 
     #[test]

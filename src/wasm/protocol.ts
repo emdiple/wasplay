@@ -14,6 +14,12 @@ export interface WazOps {
   mediaInfo: { args: Record<string, never>; result: MediaInfo }
   /** Integrated loudness in LUFS. */
   lufs: { args: Record<string, never>; result: number }
+  /**
+   * Integrated loudness from pre-decoded interleaved f32 PCM — the fallback
+   * for codecs symphonia can't decode (e.g. Opus), where the main thread
+   * decodes via WebAudio and ships the samples here. `file` is unused.
+   */
+  lufsSamples: { args: { samples: Float32Array; sampleRate: number; channels: number }; result: number }
   /** Waveform peaks in [0,1]. */
   peaks: { args: { numPeaks: number }; result: Float32Array }
   /** Scan keyframes + pick `count` evenly-spaced indices. */

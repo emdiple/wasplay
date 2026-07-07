@@ -1,8 +1,8 @@
-import { useState } from 'react'
 import { useEditorStore } from '../../store/editorStore'
 import {
   LUFS_TARGETS,
-  DEFAULT_TARGET_LUFS,
+  TARGET_MIN_LUFS,
+  TARGET_MAX_LUFS,
   GAIN_MIN_DB,
   GAIN_MAX_DB,
   clampGainDb,
@@ -23,7 +23,9 @@ export function AudioLevel({ clips, variant }: { clips: Clip[]; variant: 'strip'
   const sources = useEditorStore((s) => s.sources)
   const setClipGain = useEditorStore((s) => s.setClipGain)
   const snapshot = useEditorStore((s) => s.snapshot)
-  const [target, setTarget] = useState(DEFAULT_TARGET_LUFS)
+  // The normalize target is a shared, persisted app default — not local state.
+  const target = useEditorStore((s) => s.audioTargetLufs)
+  const setTarget = useEditorStore((s) => s.setAudioTargetLufs)
 
   if (!clips.length) return null
 
@@ -97,9 +99,29 @@ export function AudioLevel({ clips, variant }: { clips: Clip[]; variant: 'strip'
       </div>
 
       <div className="al-actions">
-        <label className="ci-target">
-          Normalize
-          <select value={target} onChange={(e) => setTarget(parseFloat(e.target.value))}>
+        <label className="al-target" title="Loudness target that Normalize aims for">
+          <span className="al-target-cap">Target</span>
+          <input
+            type="number"
+            className="ci-number al-target-num"
+            min={TARGET_MIN_LUFS}
+            max={TARGET_MAX_LUFS}
+            step={0.5}
+            value={target}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value)
+              if (Number.isFinite(v)) setTarget(Math.min(TARGET_MAX_LUFS, Math.max(TARGET_MIN_LUFS, v)))
+            }}
+            aria-label="Normalize target (LUFS)"
+          />
+          <span className="ci-unit">LUFS</span>
+          <select
+            className="al-target-preset"
+            value={LUFS_TARGETS.some((t) => t.value === target) ? String(target) : ''}
+            onChange={(e) => e.target.value && setTarget(parseFloat(e.target.value))}
+            aria-label="Loudness preset"
+          >
+            <option value="">Presets…</option>
             {LUFS_TARGETS.map((t) => (
               <option key={t.value} value={t.value}>
                 {t.label}
@@ -107,20 +129,27 @@ export function AudioLevel({ clips, variant }: { clips: Clip[]; variant: 'strip'
             ))}
           </select>
         </label>
-        <button className="btn" disabled={!canNormalize} onClick={normalize} title="Set each selected clip to reach the target">
-          ⟳
-        </button>
-        <button
-          className="btn"
-          disabled={uniform === 0}
-          onClick={() => {
-            snapshot()
-            apply(0)
-          }}
-          title="Reset gain to 0 dB"
-        >
-          ↺
-        </button>
+        <div className="al-buttons">
+          <button
+            className="btn primary"
+            disabled={!canNormalize}
+            onClick={normalize}
+            title={canNormalize ? `Set each selected clip's gain to reach ${target} LUFS` : 'No loudness measurement yet'}
+          >
+            ⟳ Normalize
+          </button>
+          <button
+            className="btn"
+            disabled={uniform === 0}
+            onClick={() => {
+              snapshot()
+              apply(0)
+            }}
+            title="Reset gain to 0 dB"
+          >
+            Reset
+          </button>
+        </div>
       </div>
     </div>
   )

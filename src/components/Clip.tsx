@@ -45,11 +45,18 @@ export function Clip({ clip, isVideo }: ClipProps) {
   const pxPerSec = useEditorStore((s) => s.pxPerSec)
   const selected = useEditorStore((s) => s.selection.has(clip.id))
 
-  // Redraw the filmstrip/waveform when zoom, trim, or decoded data changes.
+  // Redraw the filmstrip/waveform when zoom, trim, or decoded data changes —
+  // and whenever the canvas box itself resizes (track-height scaling, window
+  // resizes), so the backing store is re-rendered at the new size instead of
+  // being CSS-stretched into a distorted aspect ratio.
   // (Position changes alone don't need a redraw — only the block's `left`.)
   useEffect(() => {
     const canvas = canvasRef.current
-    if (canvas && source) drawClipDecoration(canvas, clip, source, isVideo)
+    if (!canvas || !source) return
+    drawClipDecoration(canvas, clip, source, isVideo)
+    const ro = new ResizeObserver(() => drawClipDecoration(canvas, clip, source, isVideo))
+    ro.observe(canvas)
+    return () => ro.disconnect()
   }, [source, pxPerSec, clip.dur, clip.in, clip.gainDb, isVideo])
 
   if (!source) return null
@@ -71,10 +78,24 @@ export function Clip({ clip, isVideo }: ClipProps) {
     }
 
     const startX = e.clientX
+    const startY = e.clientY
     const origins = new Map<string, number>()
     for (const c of [...store.videoClips, ...store.audioClips]) {
       if (selectedIds.has(c.id)) origins.set(c.id, c.start)
     }
+    // Vertical drag context: lane order per kind, each selected clip's original
+    // lane, and the rendered lane rects (fixed for the duration of the drag).
+    const videoOrder = store.tracks.filter((t) => t.kind === 'video').map((t) => t.id)
+    const audioOrder = store.tracks.filter((t) => t.kind === 'audio').map((t) => t.id)
+    const isVideoId = new Set(store.videoClips.map((c) => c.id))
+    const origTracks = new Map<string, string>()
+    for (const c of [...store.videoClips, ...store.audioClips]) {
+      if (selectedIds.has(c.id)) origTracks.set(c.id, c.trackId)
+    }
+    const laneRects = [...document.querySelectorAll<HTMLElement>('.track[data-track-id]')].map((row) => {
+      const r = row.getBoundingClientRect()
+      return { id: row.dataset.trackId!, kind: row.dataset.kind!, top: r.top, bottom: r.bottom }
+    })
     let moved = false
     let didSnapshot = false // capture one undo entry per drag, only once it actually moves
     el.setPointerCapture(e.pointerId)
@@ -107,7 +128,8 @@ export function Clip({ clip, isVideo }: ClipProps) {
 
     const onMove = (ev: PointerEvent) => {
       const dx = ev.clientX - startX
-      if (Math.abs(dx) > 3) {
+      const dy = ev.clientY - startY
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
         moved = true
         cancelLongPress()
       }
@@ -141,6 +163,24 @@ export function Clip({ clip, isVideo }: ClipProps) {
       const starts = new Map<string, number>()
       for (const [id, base] of origins) starts.set(id, base + delta)
       s.setClipStarts(starts)
+
+      // Vertical: dragging into another lane of the same kind moves the whole
+      // selection by the grabbed clip's lane delta (each clip clamped to a real
+      // lane of its own kind; linked partners shift among their own lanes).
+      const kind = isVideo ? 'video' : 'audio'
+      const hovered = laneRects.find((r) => r.kind === kind && ev.clientY >= r.top && ev.clientY <= r.bottom)
+      if (hovered) {
+        const grabbedOrder = isVideo ? videoOrder : audioOrder
+        const laneDelta = grabbedOrder.indexOf(hovered.id) - grabbedOrder.indexOf(origTracks.get(clipId) ?? '')
+        const assign = new Map<string, string>()
+        for (const [id, orig] of origTracks) {
+          const order = isVideoId.has(id) ? videoOrder : audioOrder
+          const idx = order.indexOf(orig)
+          if (idx < 0) continue
+          assign.set(id, order[Math.max(0, Math.min(order.length - 1, idx + laneDelta))])
+        }
+        s.setClipTracks(assign)
+      }
     }
 
     const onUp = () => {
@@ -190,6 +230,14 @@ export function Clip({ clip, isVideo }: ClipProps) {
       onContextMenu={onContextMenu}
     >
       <canvas className="clip-canvas" ref={canvasRef} />
+      {clip.transitionIn && (
+        <div
+          className="clip-transition"
+          style={{ width: Math.max(3, clip.transitionIn.dur * pxPerSec) }}
+          title={`Dissolve · ${clip.transitionIn.dur.toFixed(2)}s`}
+          aria-hidden
+        />
+      )}
       <div className="clip-label">
         <span className="clip-name">{source.name}</span>
         {!isVideo && clip.gainDb !== 0 && (

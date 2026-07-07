@@ -5,8 +5,9 @@
  * mutating, so the editor store can treat updates immutably.
  */
 
-import type { Clip } from '../types'
+import type { Clip, TimelineTrack } from '../types'
 import { uid } from './id'
+import { clampFades } from './fade'
 
 /** The timeline is always at least this long (1 minute)… */
 export const DOMAIN_MIN_S = 60
@@ -96,16 +97,23 @@ export function splitLinkGroupAt(
       const insideThisGroup = c.link === link && t > c.start + eps && t < c.start + c.dur - eps
       if (insideThisGroup) {
         const offset = t - c.start
-        const left: Clip = { ...c, dur: offset }
+        // Fades split with the cut: the left half keeps the fade-in, the right
+        // half keeps the fade-out, each re-clamped to its now-shorter length.
+        const leftFade = clampFades(offset, c.fadeIn, 0)
+        const rightFade = clampFades(c.dur - offset, 0, c.fadeOut)
+        const left: Clip = { ...c, dur: offset, fadeIn: leftFade.fadeIn, fadeOut: 0 }
         const right: Clip = {
           id: uid(),
           sourceId: c.sourceId,
           link: newLink,
+          trackId: c.trackId, // a cut never changes layers
           start: t,
           in: c.in + offset,
           dur: c.dur - offset,
           z: c.z, // keep the same stacking order as the clip it was cut from
           gainDb: c.gainDb, // both halves inherit the parent clip's level
+          fadeIn: 0,
+          fadeOut: rightFade.fadeOut,
         }
         rights.push(right)
         out.push(left, right)
@@ -147,6 +155,34 @@ export function expandToLinkGroups(allClips: Clip[], ids: Set<string>): Set<stri
 export function clipAtTime(clips: Clip[], t: number): Clip | null {
   for (const c of clips) if (t >= c.start && t < c.start + c.dur) return c
   return null
+}
+
+/**
+ * Layer priority per track id: within a kind, a later position in the tracks
+ * list is a higher layer (V2 composites above V1). The raw list index works as
+ * the priority since same-kind relative order is all comparisons ever use.
+ */
+export const trackPriority = (tracks: TimelineTrack[]): Map<string, number> =>
+  new Map(tracks.map((t, i) => [t.id, i]))
+
+/**
+ * The clip that wins at time `t` across every layer of one kind: highest track
+ * priority first, then highest within-track z. This is what the program monitor
+ * shows and what the export compositor paints on top.
+ */
+export function topmostClipAt(clips: Clip[], priority: Map<string, number>, t: number): Clip | null {
+  let best: Clip | null = null
+  for (const c of clips) {
+    if (t < c.start || t >= c.start + c.dur) continue
+    if (!best) {
+      best = c
+      continue
+    }
+    const pc = priority.get(c.trackId) ?? 0
+    const pb = priority.get(best.trackId) ?? 0
+    if (pc > pb || (pc === pb && c.z > best.z)) best = c
+  }
+  return best
 }
 
 /**

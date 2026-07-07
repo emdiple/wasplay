@@ -2,14 +2,18 @@ import { useEditorStore } from '../store/editorStore'
 import { hsl } from '../lib/color'
 import { formatTC } from '../lib/format'
 import { AudioLevel } from './inspector/AudioLevel'
+import { ClipFades } from './inspector/ClipFades'
+import { ClipDissolve, useCanDissolve } from './inspector/ClipDissolve'
+import { InspGroup } from './inspector/InspGroup'
 import { SourceSections } from './inspector/SourceSections'
 import type { Clip, Source } from '../types'
 
 /**
- * The persistent, context-aware right Inspector (pro-NLE Properties panel).
- * Shows the selected clip's properties + audio level + its source details; or,
- * when only a bin source is on the stage, just the source details; else an
- * empty state. Desktop/tablet only — mobile keeps the timeline strip + modal.
+ * The persistent, context-aware right Inspector — a pro-NLE properties panel.
+ * A selected clip gets a header (swatch · name · type/format chips) followed by
+ * collapsible property groups (Info, Fades, Transition, Audio) and its source
+ * detail; a bin source alone shows just the source detail; else an empty state.
+ * Desktop/tablet only — mobile keeps the timeline strip + analyzer modal.
  */
 export function Inspector() {
   const selection = useEditorStore((s) => s.selection)
@@ -20,11 +24,16 @@ export function Inspector() {
   const toggleInspector = useEditorStore((s) => s.toggleInspector)
 
   const byId = new Map(sources.map((s) => [s.id, s]))
-  const selectedClips = [...videoClips, ...audioClips].filter((c) => selection.has(c.id))
+  const selectedVideo = videoClips.filter((c) => selection.has(c.id))
   const selectedAudio = audioClips.filter((c) => selection.has(c.id))
+  const selectedClips = [...selectedVideo, ...selectedAudio]
   const srcIds = new Set(selectedClips.map((c) => c.sourceId))
+  const singleGroup = new Set(selectedClips.map((c) => c.link)).size === 1
+  const repClip = selectedClips[0]
+  const canDissolve = useCanDissolve(singleGroup ? repClip : undefined)
+
   // The source to detail: the sole source across the selection, else the bin stage.
-  const soleClipSource = srcIds.size === 1 ? byId.get(selectedClips[0].sourceId) : undefined
+  const soleClipSource = srcIds.size === 1 ? byId.get(repClip.sourceId) : undefined
   const stageSource = byId.get(selectedSrcId ?? '')
   const detailSource = soleClipSource ?? (selectedClips.length === 0 ? stageSource : undefined)
 
@@ -39,20 +48,35 @@ export function Inspector() {
       <div className="inspector-body">
         {selectedClips.length > 0 ? (
           <>
-            <ClipSection clips={selectedClips} byId={byId} />
-            {selectedAudio.length > 0 && (
-              <section className="insp-section">
-                <div className="panel-label">Audio Level</div>
-                <AudioLevel clips={selectedAudio} variant="stack" />
-              </section>
+            <ClipHeader clips={selectedClips} byId={byId} hasVideo={selectedVideo.length > 0} hasAudio={selectedAudio.length > 0} />
+            {srcIds.size === 1 && (
+              <InspGroup title="Info">
+                <ClipInfo clip={repClip} />
+              </InspGroup>
             )}
-            {detailSource && <SourceSections src={detailSource} />}
+            <InspGroup title="Fades">
+              <ClipFades clips={selectedClips} variant="stack" />
+            </InspGroup>
+            {singleGroup && canDissolve && (
+              <InspGroup title="Transition" hint="Dissolve">
+                <ClipDissolve clip={repClip} />
+              </InspGroup>
+            )}
+            {selectedAudio.length > 0 && (
+              <InspGroup title="Audio">
+                <AudioLevel clips={selectedAudio} variant="stack" />
+              </InspGroup>
+            )}
+            {detailSource && <SourceSections src={detailSource} context="clip" />}
           </>
         ) : detailSource ? (
-          <SourceSections src={detailSource} />
+          <SourceSections src={detailSource} context="source" />
         ) : (
           <div className="inspector-empty">
-            Select a clip on the timeline or a media item to see its properties here.
+            <span className="inspector-empty-icon" aria-hidden>
+              ⌗
+            </span>
+            <p>Select a clip on the timeline or a media item to see its properties here.</p>
           </div>
         )}
       </div>
@@ -60,39 +84,63 @@ export function Inspector() {
   )
 }
 
-function ClipSection({ clips, byId }: { clips: Clip[]; byId: Map<string, Source> }) {
+/** The identity block at the top of a clip selection: swatch, name, type/format chips. */
+function ClipHeader({
+  clips,
+  byId,
+  hasVideo,
+  hasAudio,
+}: {
+  clips: Clip[]
+  byId: Map<string, Source>
+  hasVideo: boolean
+  hasAudio: boolean
+}) {
   const srcIds = new Set(clips.map((c) => c.sourceId))
-  // Multiple sources selected → a bare summary; nothing meaningful to detail.
-  if (srcIds.size > 1) {
-    return (
-      <div className="panel">
-        <div className="panel-label">Selection</div>
-        <div className="insp-rows">
-          <Row k="Clips" v={String(clips.length)} />
-          <Row k="Sources" v={String(srcIds.size)} />
+  const links = new Set(clips.map((c) => c.link))
+  const multi = srcIds.size > 1
+  const src = multi ? undefined : byId.get(clips[0].sourceId)
+  const kind = hasVideo && hasAudio ? 'A / V' : hasVideo ? 'Video' : 'Audio'
+
+  const chips: string[] = multi
+    ? [`${clips.length} clips`, `${srcIds.size} sources`]
+    : [kind, ...(src?.isVideo && src.width ? [`${src.width}×${src.height}`] : []), formatTC(clips[0].dur)]
+
+  const title = multi ? 'Multiple clips' : (src?.name ?? 'Clip')
+  const swatch = src ? hsl(src.color, 0.9) : '#5b6070'
+
+  return (
+    <div className="insp-clip-header">
+      <span className="insp-swatch" style={{ background: swatch }} />
+      <div className="insp-clip-meta">
+        <span className="insp-clip-name" title={title}>
+          {title}
+          {!multi && links.size === 1 && clips.length > 1 && (
+            <span className="insp-linked" title="Linked A/V">
+              🔗
+            </span>
+          )}
+        </span>
+        <div className="insp-chips">
+          {chips.map((c) => (
+            <span className="insp-chip" key={c}>
+              {c}
+            </span>
+          ))}
         </div>
       </div>
-    )
-  }
-  // One source (typically a linked A/V pair, which shares start/in/dur) → show
-  // the clip's timings from a representative clip.
-  const c = clips[0]
-  const src = byId.get(c.sourceId)
+    </div>
+  )
+}
+
+/** Read-only timing read-out for a single clip (or a linked pair sharing timings). */
+function ClipInfo({ clip }: { clip: Clip }) {
   return (
-    <div className="panel">
-      <div className="panel-label">Clip{clips.length > 1 ? ` · ${clips.length} linked` : ''}</div>
-      <div className="insp-clip-head">
-        {src && <span className="insp-swatch" style={{ background: hsl(src.color, 0.9) }} />}
-        <span className="insp-clip-name" title={src?.name}>
-          {src?.name ?? 'clip'}
-        </span>
-      </div>
-      <div className="insp-rows">
-        <Row k="Start" v={formatTC(c.start)} />
-        <Row k="Duration" v={formatTC(c.dur)} />
-        <Row k="In" v={formatTC(c.in)} />
-        <Row k="Out" v={formatTC(c.in + c.dur)} />
-      </div>
+    <div className="insp-rows">
+      <Row k="Start" v={formatTC(clip.start)} />
+      <Row k="Duration" v={formatTC(clip.dur)} />
+      <Row k="In" v={formatTC(clip.in)} />
+      <Row k="Out" v={formatTC(clip.in + clip.dur)} />
     </div>
   )
 }

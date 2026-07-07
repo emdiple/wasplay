@@ -8,11 +8,13 @@
  */
 
 import { create } from 'zustand'
-import type { Clip, Source, Tool } from '../types'
+import type { Clip, Source, TimelineTrack, Tool, TrackKind } from '../types'
 import { formatTC } from '../lib/format'
-import { nextZ, uid } from '../lib/id'
+import { nextZ, seedIds, uid } from '../lib/id'
 import { linkedPartner, linksAtTime, splitLinkGroupAt, trackEnd } from '../lib/timeline'
-import { clampGainDb } from '../lib/loudness'
+import { rippleAddDissolve, rippleRemoveDissolve } from '../lib/transition'
+import { clampGainDb, clampTargetLufs, DEFAULT_TARGET_LUFS } from '../lib/loudness'
+import { clampFades } from '../lib/fade'
 import { initialTheme, persistTheme, readStoredTheme, type Theme } from '../lib/theme'
 
 /** Position + target clip for the clip right-click menu; null when closed. */
@@ -27,7 +29,14 @@ interface Doc {
   sources: Source[]
   videoClips: Clip[]
   audioClips: Clip[]
+  tracks: TimelineTrack[]
 }
+
+/** The two starter layers every fresh (or legacy) project gets. */
+export const DEFAULT_TRACKS: TimelineTrack[] = [
+  { id: 'v1', kind: 'video' },
+  { id: 'a1', kind: 'audio' },
+]
 
 const HISTORY_LIMIT = 100
 
@@ -36,6 +45,8 @@ interface EditorState {
   sources: Source[]
   videoClips: Clip[]
   audioClips: Clip[]
+  /** Ordered timeline layers; within a kind, later = higher layer (V2 over V1). */
+  tracks: TimelineTrack[]
   selection: Set<string> // selected clip ids
   selectedSrcId: string | null // source shown in the preview stage
   analyzerSrcId: string | null // source open in the analyzer panel (null = closed)
@@ -53,6 +64,11 @@ interface EditorState {
   previewMuted: boolean
   theme: Theme
   themeExplicit: boolean // true once the user has manually toggled (stop following OS)
+
+  // ── Editing defaults (app preferences, persisted across sessions) ──
+  /** Loudness target (LUFS) that "Normalize" aims for; user-editable, shared by
+   *  the clip and source level controls. */
+  audioTargetLufs: number
 
   // ── Resizable panels (desktop/tablet; ignored in the mobile layout) ──
   binW: number // media-bin column width, px
@@ -76,6 +92,7 @@ interface EditorState {
     sources: Source[]
     videoClips: Clip[]
     audioClips: Clip[]
+    tracks?: TimelineTrack[]
     pxPerSec: number
     playheadTime: number
     selectedSrcId: string | null
@@ -83,6 +100,7 @@ interface EditorState {
     trackScale?: number
     inspectorW?: number
     inspectorOpen?: boolean
+    audioTargetLufs?: number
   }) => void
 
   // ── Source actions ──
@@ -95,12 +113,31 @@ interface EditorState {
   closeAnalyzer: () => void
 
   // ── Timeline actions ──
-  placeSource: (srcId: string, at: number) => void
+  /** Place a source's clips at `at`. `target` routes them onto specific tracks;
+   *  omitted kinds land on the first (lowest) track of that kind. */
+  placeSource: (srcId: string, at: number, target?: { videoTrackId?: string; audioTrackId?: string }) => void
   appendSource: (srcId: string) => void
   setClipStarts: (starts: Map<string, number>) => void
+  /** Reassign clips to tracks (vertical drag). Does not snapshot — the caller
+   *  snapshots once at the start of the drag, like setClipStarts. */
+  setClipTracks: (assign: Map<string, string>) => void
+  /** Append a new empty layer of `kind` (becomes the highest V / lowest A row). */
+  addTrack: (kind: TrackKind) => void
+  /** Remove a layer and every clip on it (min one track per kind is kept). */
+  removeTrack: (trackId: string) => void
   /** Set the output gain (dB) on the given clips. Does not snapshot — the caller
    *  snapshots once at the start of an interaction (see the clip inspector). */
   setClipGain: (clipIds: Iterable<string>, gainDb: number) => void
+  /** Set the fade-in and/or fade-out (seconds) on the given clips, each re-clamped
+   *  to its own duration. Does not snapshot — the caller snapshots once at the
+   *  start of the interaction (see the clip inspector), mirroring setClipGain. */
+  setClipFades: (clipIds: Iterable<string>, fades: { fadeIn?: number; fadeOut?: number }) => void
+  /** Add (or re-apply at a new length) a cross-dissolve into `clipId`'s group from
+   *  the clip before it, rippling the group + everything after left to overlap.
+   *  Returns false when there's no adjacent predecessor. Snapshots on success. */
+  setClipTransition: (clipId: string, dur: number) => boolean
+  /** Remove `clipId`'s dissolve, rippling the group + everything after back right. */
+  removeClipTransition: (clipId: string) => void
   cutLinkedAt: (link: string, t: number) => boolean
   splitAtPlayhead: () => void
   deleteSelected: () => void
@@ -131,6 +168,8 @@ interface EditorState {
   toggleInspector: () => void
   setPlayhead: (t: number) => void
   togglePreviewMuted: () => void
+  /** Set the shared normalize target (LUFS); clamped to the sane range. */
+  setAudioTargetLufs: (lufs: number) => void
   setExportOpen: (open: boolean) => void
   toggleTheme: () => void
   /** Follow an OS theme change — only applied while the user hasn't manually toggled. */
@@ -148,6 +187,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   sources: [],
   videoClips: [],
   audioClips: [],
+  tracks: DEFAULT_TRACKS,
   selection: new Set(),
   selectedSrcId: null,
   analyzerSrcId: null,
@@ -166,6 +206,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   previewMuted: false,
   theme: initialTheme(),
   themeExplicit: readStoredTheme() != null,
+  audioTargetLufs: DEFAULT_TARGET_LUFS,
 
   busy: false,
   loadingMsg: 'Loading media…',
@@ -175,7 +216,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((state) => ({
       past: [
         ...state.past,
-        { sources: state.sources, videoClips: state.videoClips, audioClips: state.audioClips },
+        { sources: state.sources, videoClips: state.videoClips, audioClips: state.audioClips, tracks: state.tracks },
       ].slice(-HISTORY_LIMIT),
       future: [], // a new edit invalidates the redo stack
     })),
@@ -188,6 +229,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         sources: state.sources,
         videoClips: state.videoClips,
         audioClips: state.audioClips,
+        tracks: state.tracks,
       }
       return {
         ...prev,
@@ -206,6 +248,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         sources: state.sources,
         videoClips: state.videoClips,
         audioClips: state.audioClips,
+        tracks: state.tracks,
       }
       return {
         ...next,
@@ -216,11 +259,29 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
     }),
 
-  hydrate: (doc) =>
+  hydrate: (doc) => {
+    // Re-seed the id/z counters past every restored id — they reset on reload,
+    // and colliding ids break React keys and multi-select drags (see lib/id.ts).
+    const allClips = [...doc.videoClips, ...doc.audioClips]
+    // Guarantee at least one layer of each kind, whatever was persisted.
+    const tracks = [...(doc.tracks ?? [])]
+    if (!tracks.some((t) => t.kind === 'video')) tracks.unshift({ id: 'v1', kind: 'video' })
+    if (!tracks.some((t) => t.kind === 'audio')) tracks.push({ id: 'a1', kind: 'audio' })
+    seedIds(
+      [...doc.sources.map((s) => s.id), ...tracks.map((t) => t.id), ...allClips.flatMap((c) => [c.id, c.link])],
+      allClips.map((c) => c.z),
+    )
+    // Migrate legacy single-layer sessions: clips without a (valid) trackId land
+    // on the first track of their kind.
+    const firstOf = (kind: TrackKind) => tracks.find((t) => t.kind === kind)?.id ?? ''
+    const valid = new Set(tracks.map((t) => t.id))
+    const settle = (clips: Clip[], kind: TrackKind) =>
+      clips.map((c) => (c.trackId && valid.has(c.trackId) ? c : { ...c, trackId: firstOf(kind) }))
     set({
       sources: doc.sources,
-      videoClips: doc.videoClips,
-      audioClips: doc.audioClips,
+      videoClips: settle(doc.videoClips, 'video'),
+      audioClips: settle(doc.audioClips, 'audio'),
+      tracks,
       pxPerSec: doc.pxPerSec,
       playheadTime: doc.playheadTime,
       selectedSrcId: doc.selectedSrcId,
@@ -228,13 +289,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ...(doc.trackScale != null ? { trackScale: doc.trackScale } : {}),
       ...(doc.inspectorW != null ? { inspectorW: doc.inspectorW } : {}),
       ...(doc.inspectorOpen != null ? { inspectorOpen: doc.inspectorOpen } : {}),
+      ...(doc.audioTargetLufs != null ? { audioTargetLufs: clampTargetLufs(doc.audioTargetLufs) } : {}),
       // A restored session starts with a clean slate for transient/history state.
       selection: new Set(),
       past: [],
       future: [],
       contextMenu: null,
       analyzerSrcId: null,
-    }),
+    })
+  },
 
   addSource: (src) =>
     set((state) => ({
@@ -269,7 +332,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   openAnalyzer: (srcId) => set({ analyzerSrcId: srcId }),
   closeAnalyzer: () => set({ analyzerSrcId: null }),
 
-  placeSource: (srcId, at) => {
+  placeSource: (srcId, at, target) => {
     const src = sourceById(get().sources, srcId)
     if (!src) return
     get().snapshot()
@@ -278,11 +341,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((state) => {
       const videoClips = [...state.videoClips]
       const audioClips = [...state.audioClips]
+      // Route each half onto the requested track (validated), else the first
+      // (lowest) layer of its kind.
+      const trackFor = (kind: TrackKind, wanted?: string) =>
+        (wanted && state.tracks.find((t) => t.id === wanted && t.kind === kind)?.id) ??
+        state.tracks.find((t) => t.kind === kind)?.id ??
+        ''
       // New clips inherit the source's current gain as a starting point; each
       // clip is independently adjustable from the timeline afterwards.
       const seed = { link, start, in: 0, dur: src.duration, gainDb: src.gainDb }
-      if (src.isVideo) videoClips.push({ id: uid(), sourceId: src.id, z: nextZ(), ...seed })
-      if (src.hasAudio) audioClips.push({ id: uid(), sourceId: src.id, z: nextZ(), ...seed })
+      if (src.isVideo)
+        videoClips.push({ id: uid(), sourceId: src.id, z: nextZ(), trackId: trackFor('video', target?.videoTrackId), ...seed })
+      if (src.hasAudio)
+        audioClips.push({ id: uid(), sourceId: src.id, z: nextZ(), trackId: trackFor('audio', target?.audioTrackId), ...seed })
       return { videoClips, audioClips, selectedSrcId: src.id }
     })
   },
@@ -298,6 +369,51 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return { videoClips: apply(state.videoClips), audioClips: apply(state.audioClips) }
     }),
 
+  setClipTracks: (assign) =>
+    set((state) => {
+      // Only accept moves onto an existing track of the clip's own kind.
+      const kindOf = new Map(state.tracks.map((t) => [t.id, t.kind]))
+      const apply = (clips: Clip[], kind: TrackKind) =>
+        clips.map((c) => {
+          const to = assign.get(c.id)
+          return to && to !== c.trackId && kindOf.get(to) === kind ? { ...c, trackId: to } : c
+        })
+      return { videoClips: apply(state.videoClips, 'video'), audioClips: apply(state.audioClips, 'audio') }
+    }),
+
+  addTrack: (kind) => {
+    get().snapshot()
+    set((state) => {
+      const track: TimelineTrack = { id: uid(), kind }
+      // Insert after the last track of the same kind, so within-kind order stays
+      // contiguous and the new layer becomes the highest of its kind.
+      const idx = state.tracks.map((t) => t.kind).lastIndexOf(kind)
+      const tracks = [...state.tracks]
+      tracks.splice(idx < 0 ? tracks.length : idx + 1, 0, track)
+      return { tracks }
+    })
+  },
+
+  removeTrack: (trackId) => {
+    const state = get()
+    const track = state.tracks.find((t) => t.id === trackId)
+    if (!track) return
+    // Never drop the last layer of a kind.
+    if (state.tracks.filter((t) => t.kind === track.kind).length <= 1) return
+    get().snapshot()
+    set((s) => {
+      const removed = new Set(
+        [...s.videoClips, ...s.audioClips].filter((c) => c.trackId === trackId).map((c) => c.id),
+      )
+      return {
+        tracks: s.tracks.filter((t) => t.id !== trackId),
+        videoClips: s.videoClips.filter((c) => c.trackId !== trackId),
+        audioClips: s.audioClips.filter((c) => c.trackId !== trackId),
+        selection: new Set([...s.selection].filter((id) => !removed.has(id))),
+      }
+    })
+  },
+
   setClipGain: (clipIds, gainDb) =>
     set((state) => {
       const ids = new Set(clipIds)
@@ -305,6 +421,51 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const apply = (clips: Clip[]) => clips.map((c) => (ids.has(c.id) ? { ...c, gainDb: g } : c))
       return { videoClips: apply(state.videoClips), audioClips: apply(state.audioClips) }
     }),
+
+  setClipFades: (clipIds, fades) =>
+    set((state) => {
+      const ids = new Set(clipIds)
+      const apply = (clips: Clip[]) =>
+        clips.map((c) => {
+          if (!ids.has(c.id)) return c
+          const next = clampFades(
+            c.dur,
+            fades.fadeIn ?? c.fadeIn ?? 0,
+            fades.fadeOut ?? c.fadeOut ?? 0,
+          )
+          return { ...c, fadeIn: next.fadeIn, fadeOut: next.fadeOut }
+        })
+      return { videoClips: apply(state.videoClips), audioClips: apply(state.audioClips) }
+    }),
+
+  setClipTransition: (clipId, dur) => {
+    const s = get()
+    let video = s.videoClips
+    let audio = s.audioClips
+    const clip = [...video, ...audio].find((c) => c.id === clipId)
+    if (!clip) return false
+    // Re-applying at a new length: undo the existing ripple first so the geometry
+    // is recomputed from the clean, pre-transition positions (keeps it stable).
+    if (clip.transitionIn) {
+      const back = rippleRemoveDissolve(video, audio, clipId)
+      video = back.video
+      audio = back.audio
+    }
+    const res = rippleAddDissolve(video, audio, clipId, dur)
+    if (!res) return false
+    get().snapshot()
+    set({ videoClips: res.video, audioClips: res.audio, selection: new Set(res.groupIds) })
+    return true
+  },
+
+  removeClipTransition: (clipId) => {
+    const s = get()
+    const clip = [...s.videoClips, ...s.audioClips].find((c) => c.id === clipId)
+    if (!clip?.transitionIn) return
+    get().snapshot()
+    const res = rippleRemoveDissolve(s.videoClips, s.audioClips, clipId)
+    set({ videoClips: res.video, audioClips: res.audio })
+  },
 
   cutLinkedAt: (link, t) => {
     const { videoClips, audioClips } = get()
@@ -402,7 +563,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().snapshot()
     set((state) => {
       const onVideoTrack = state.videoClips.some((c) => c.id === clipId)
-      const clips = onVideoTrack ? state.videoClips : state.audioClips
+      const all = onVideoTrack ? state.videoClips : state.audioClips
+      // Stacking order is a within-track affair — only same-layer clips compete.
+      const target = all.find((c) => c.id === clipId)
+      const clips = target ? all.filter((c) => c.trackId === target.trackId) : all
       // Seed from an existing clip's z, not 0 — a phantom 0 would skew the
       // result whenever every real z is already above (or below) zero.
       const maxZ = clips.reduce((m, c) => Math.max(m, c.z), clips[0]?.z ?? 0)
@@ -415,7 +579,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().snapshot()
     set((state) => {
       const onVideoTrack = state.videoClips.some((c) => c.id === clipId)
-      const clips = onVideoTrack ? state.videoClips : state.audioClips
+      const all = onVideoTrack ? state.videoClips : state.audioClips
+      const target = all.find((c) => c.id === clipId)
+      const clips = target ? all.filter((c) => c.trackId === target.trackId) : all
       const minZ = clips.reduce((m, c) => Math.min(m, c.z), clips[0]?.z ?? 0)
       const bump = (arr: Clip[]) => arr.map((c) => (c.id === clipId ? { ...c, z: minZ - 1 } : c))
       return onVideoTrack ? { videoClips: bump(state.videoClips) } : { audioClips: bump(state.audioClips) }
@@ -451,6 +617,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   toggleInspector: () => set((s) => ({ inspectorOpen: !s.inspectorOpen })),
   setPlayhead: (t) => set({ playheadTime: Math.max(0, t) }),
   togglePreviewMuted: () => set((state) => ({ previewMuted: !state.previewMuted })),
+  setAudioTargetLufs: (lufs) => set({ audioTargetLufs: clampTargetLufs(lufs) }),
   setExportOpen: (open) => set({ exportOpen: open }),
 
   toggleTheme: () =>
