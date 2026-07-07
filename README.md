@@ -6,6 +6,8 @@
   <img alt="Wazplay" src="public/branding/icon-circle-dark.png" width="220">
 </picture>
 
+<br />
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="public/branding/wordmark-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="public/branding/wordmark-light.png">
